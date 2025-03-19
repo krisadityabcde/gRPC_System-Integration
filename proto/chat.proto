@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package chat;
+
+// Request untuk login atau registrasi
+message LoginRequest {
+  string username = 1;
+}
+
+// Respons untuk login
+message LoginResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Request untuk mengirim pesan
+message MessageRequest {
+  string username = 1;
+  string message = 2;
+}
+
+// Respons setelah mengirim pesan
+message MessageResponse {
+  string status = 1;
+}
+
+// Pesan yang dikirim ke client
+message ChatMessage {
+  string username = 1;
+  string message = 2;
+}
+
+// Request kosong untuk meminta pesan terbaru
+message Empty {}
+
+// Definisi layanan gRPC
+service ChatService {
+  // Unary RPC - User mendaftar/melakukan login
+  rpc Login (LoginRequest) returns (LoginResponse);
+
+  // Server Streaming RPC - Saat user masuk chat room, server mengirim pesan terbaru
+  rpc GetRecentMessages (Empty) returns (stream ChatMessage);
+
+  // Client Streaming RPC - User bisa mengirim beberapa pesan sebelum mendapat respons
+  rpc SendMultipleMessages (stream MessageRequest) returns (MessageResponse);
+
+  // Bidirectional Streaming RPC - Chat real-time antara banyak user
+  rpc ChatStream (stream MessageRequest) returns (stream ChatMessage);
+}
