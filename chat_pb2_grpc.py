@@ -26,8 +26,7 @@ if _version_not_supported:
 
 
 class ChatServiceStub(object):
-    """Definisi layanan gRPC
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
         """Constructor.
@@ -43,47 +42,46 @@ class ChatServiceStub(object):
         self.GetRecentMessages = channel.unary_stream(
                 '/chat.ChatService/GetRecentMessages',
                 request_serializer=chat__pb2.Empty.SerializeToString,
-                response_deserializer=chat__pb2.ChatMessage.FromString,
-                _registered_method=True)
-        self.SendMultipleMessages = channel.stream_unary(
-                '/chat.ChatService/SendMultipleMessages',
-                request_serializer=chat__pb2.MessageRequest.SerializeToString,
                 response_deserializer=chat__pb2.MessageResponse.FromString,
+                _registered_method=True)
+        self.BroadcastChat = channel.stream_unary(
+                '/chat.ChatService/BroadcastChat',
+                request_serializer=chat__pb2.MessageRequest.SerializeToString,
+                response_deserializer=chat__pb2.BroadcastResponse.FromString,
                 _registered_method=True)
         self.ChatStream = channel.stream_stream(
                 '/chat.ChatService/ChatStream',
                 request_serializer=chat__pb2.MessageRequest.SerializeToString,
-                response_deserializer=chat__pb2.ChatMessage.FromString,
+                response_deserializer=chat__pb2.MessageResponse.FromString,
                 _registered_method=True)
 
 
 class ChatServiceServicer(object):
-    """Definisi layanan gRPC
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def Login(self, request, context):
-        """Unary RPC - User mendaftar/melakukan login
+        """Unary RPC: User login
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetRecentMessages(self, request, context):
-        """Server Streaming RPC - Saat user masuk chat room, server mengirim pesan terbaru
+        """Server Streaming: Get recent messages
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SendMultipleMessages(self, request_iterator, context):
-        """Client Streaming RPC - User bisa mengirim beberapa pesan sebelum mendapat respons
+    def BroadcastChat(self, request_iterator, context):
+        """Client Streaming: Broadcast chat messages
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ChatStream(self, request_iterator, context):
-        """Bidirectional Streaming RPC - Chat real-time antara banyak user
+        """Bidirectional Streaming: Real-time chat
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -100,17 +98,17 @@ def add_ChatServiceServicer_to_server(servicer, server):
             'GetRecentMessages': grpc.unary_stream_rpc_method_handler(
                     servicer.GetRecentMessages,
                     request_deserializer=chat__pb2.Empty.FromString,
-                    response_serializer=chat__pb2.ChatMessage.SerializeToString,
-            ),
-            'SendMultipleMessages': grpc.stream_unary_rpc_method_handler(
-                    servicer.SendMultipleMessages,
-                    request_deserializer=chat__pb2.MessageRequest.FromString,
                     response_serializer=chat__pb2.MessageResponse.SerializeToString,
+            ),
+            'BroadcastChat': grpc.stream_unary_rpc_method_handler(
+                    servicer.BroadcastChat,
+                    request_deserializer=chat__pb2.MessageRequest.FromString,
+                    response_serializer=chat__pb2.BroadcastResponse.SerializeToString,
             ),
             'ChatStream': grpc.stream_stream_rpc_method_handler(
                     servicer.ChatStream,
                     request_deserializer=chat__pb2.MessageRequest.FromString,
-                    response_serializer=chat__pb2.ChatMessage.SerializeToString,
+                    response_serializer=chat__pb2.MessageResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -121,8 +119,7 @@ def add_ChatServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ChatService(object):
-    """Definisi layanan gRPC
-    """
+    """Missing associated documentation comment in .proto file."""
 
     @staticmethod
     def Login(request,
@@ -167,7 +164,7 @@ class ChatService(object):
             target,
             '/chat.ChatService/GetRecentMessages',
             chat__pb2.Empty.SerializeToString,
-            chat__pb2.ChatMessage.FromString,
+            chat__pb2.MessageResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -179,7 +176,7 @@ class ChatService(object):
             _registered_method=True)
 
     @staticmethod
-    def SendMultipleMessages(request_iterator,
+    def BroadcastChat(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -192,9 +189,9 @@ class ChatService(object):
         return grpc.experimental.stream_unary(
             request_iterator,
             target,
-            '/chat.ChatService/SendMultipleMessages',
+            '/chat.ChatService/BroadcastChat',
             chat__pb2.MessageRequest.SerializeToString,
-            chat__pb2.MessageResponse.FromString,
+            chat__pb2.BroadcastResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -221,7 +218,7 @@ class ChatService(object):
             target,
             '/chat.ChatService/ChatStream',
             chat__pb2.MessageRequest.SerializeToString,
-            chat__pb2.ChatMessage.FromString,
+            chat__pb2.MessageResponse.FromString,
             options,
             channel_credentials,
             insecure,

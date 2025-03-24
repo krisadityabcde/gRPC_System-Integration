@@ -1,82 +1,67 @@
 import grpc
 import chat_pb2
 import chat_pb2_grpc
+import time
 
-def login():
+def login(stub, username):
+    response = stub.Login(chat_pb2.LoginRequest(username=username))
+    print(response.message)
+
+def get_recent_messages(stub):
+    print("\nRecent Messages:")
+    for message in stub.GetRecentMessages(chat_pb2.Empty()):
+        print(f"{message.username}: {message.message}")
+
+def broadcast_chat(stub, username):
+    print("\nKetik pesan untuk broadcast (ketik 'exit' untuk berhenti):")
+
+    def message_generator():
+        while True:
+            msg = input("> ")
+            if msg.lower() == "exit":
+                break
+            yield chat_pb2.MessageRequest(username=username, message=msg)
+
+    response = stub.BroadcastChat(message_generator())
+    print(f"Total {response.count} pesan dikirim.")
+
+def chat_stream(stub, username):
+    print("\nMulai chat real-time (ketik 'exit' untuk keluar)")
+
+    def generate_messages():
+        while True:
+            msg = input("> ")
+            if msg.lower() == "exit":
+                yield chat_pb2.MessageRequest(username=username, message=msg)
+                break
+            yield chat_pb2.MessageRequest(username=username, message=msg)
+
+    responses = stub.ChatStream(generate_messages())
+
+    try:
+        for response in responses:
+            print(f"{response.username}: {response.message}")  # Terima pesan dari client lain
+    except grpc._channel._Rendezvous:
+        print("Chat session ended.")
+
+
+
+if __name__ == "__main__":
     channel = grpc.insecure_channel("localhost:50051")
     stub = chat_pb2_grpc.ChatServiceStub(channel)
 
     username = input("Masukkan username: ")
-    request = chat_pb2.LoginRequest(username=username)
-    response = stub.Login(request)
+    login(stub, username)
 
-    if response.success:
-        print("Login berhasil!")
-        return username
-    else:
-        print("Login gagal:", response.message)
-        return None
+    while True:
+        print("\n1. Get Recent Messages\n2. Broadcast Chat\n3. Real-time Chat\n4. Keluar")
+        choice = input("Pilih opsi: ")
 
-def get_recent_messages():
-    channel = grpc.insecure_channel("localhost:50051")
-    stub = chat_pb2_grpc.ChatServiceStub(channel)
-
-    request = chat_pb2.Empty()
-    responses = stub.GetRecentMessages(request)
-
-    print("\n=== Pesan Terbaru ===")
-    for msg in responses:
-        print(f"{msg.username}: {msg.message}")
-
-def send_multiple_messages(username):
-    channel = grpc.insecure_channel("localhost:50051")
-    stub = chat_pb2_grpc.ChatServiceStub(channel)
-
-    def message_stream():
-        while True:
-            message = input("Masukkan pesan (atau ketik 'exit' untuk selesai): ")
-            if message.lower() == "exit":
-                break
-            yield chat_pb2.MessageRequest(username=username, message=message)
-
-    response = stub.SendMultipleMessages(message_stream())
-    print(f"Server Response: {response.status}")
-
-def chat_stream(username):
-    channel = grpc.insecure_channel("localhost:50051")
-    stub = chat_pb2_grpc.ChatServiceStub(channel)
-
-    def generate_messages():
-        while True:
-            message = input("Masukkan pesan (atau ketik 'exit' untuk keluar): ")
-            if message.lower() == "exit":
-                break
-            yield chat_pb2.MessageRequest(username=username, message=message)
-
-    responses = stub.ChatStream(generate_messages())
-
-    print("\n=== Live Chat ===")
-    for response in responses:
-        print(f"{response.username}: {response.message}")
-
-if __name__ == "__main__":
-    username = login()
-    if username:
-        while True:
-            print("\n1. Lihat Pesan Terbaru (Server Streaming)")
-            print("2. Kirim Banyak Pesan Sekaligus (Client Streaming)")
-            print("3. Live Chat (Bidirectional Streaming)")
-            print("4. Keluar")
-            choice = input("Pilih opsi: ")
-
-            if choice == "1":
-                get_recent_messages()
-            elif choice == "2":
-                send_multiple_messages(username)
-            elif choice == "3":
-                chat_stream(username)
-            elif choice == "4":
-                print("Keluar dari chat...")
-                break
-            else:
-                print("Pilihan tidak valid, coba lagi.")
+        if choice == "1":
+            get_recent_messages(stub)
+        elif choice == "2":
+            broadcast_chat(stub, username)
+        elif choice == "3":
+            chat_stream(stub, username)
+        elif choice == "4":
+            break

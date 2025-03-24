@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nchat.proto\x12\x04\x63hat\" \n\x0cLoginRequest\x12\x10\n\x08username\x18\x01 \x01(\t\"1\n\rLoginResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"3\n\x0eMessageRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\"!\n\x0fMessageResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\"0\n\x0b\x43hatMessage\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\"\x07\n\x05\x45mpty2\xf8\x01\n\x0b\x43hatService\x12\x30\n\x05Login\x12\x12.chat.LoginRequest\x1a\x13.chat.LoginResponse\x12\x35\n\x11GetRecentMessages\x12\x0b.chat.Empty\x1a\x11.chat.ChatMessage0\x01\x12\x45\n\x14SendMultipleMessages\x12\x14.chat.MessageRequest\x1a\x15.chat.MessageResponse(\x01\x12\x39\n\nChatStream\x12\x14.chat.MessageRequest\x1a\x11.chat.ChatMessage(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nchat.proto\x12\x04\x63hat\" \n\x0cLoginRequest\x12\x10\n\x08username\x18\x01 \x01(\t\"1\n\rLoginResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"\x07\n\x05\x45mpty\"3\n\x0eMessageRequest\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\"4\n\x0fMessageResponse\x12\x10\n\x08username\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\"\"\n\x11\x42roadcastResponse\x12\r\n\x05\x63ount\x18\x01 \x01(\x05\x32\xfb\x01\n\x0b\x43hatService\x12\x30\n\x05Login\x12\x12.chat.LoginRequest\x1a\x13.chat.LoginResponse\x12\x39\n\x11GetRecentMessages\x12\x0b.chat.Empty\x1a\x15.chat.MessageResponse0\x01\x12@\n\rBroadcastChat\x12\x14.chat.MessageRequest\x1a\x17.chat.BroadcastResponse(\x01\x12=\n\nChatStream\x12\x14.chat.MessageRequest\x1a\x15.chat.MessageResponse(\x01\x30\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,14 +35,14 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LOGINREQUEST']._serialized_end=52
   _globals['_LOGINRESPONSE']._serialized_start=54
   _globals['_LOGINRESPONSE']._serialized_end=103
-  _globals['_MESSAGEREQUEST']._serialized_start=105
-  _globals['_MESSAGEREQUEST']._serialized_end=156
-  _globals['_MESSAGERESPONSE']._serialized_start=158
-  _globals['_MESSAGERESPONSE']._serialized_end=191
-  _globals['_CHATMESSAGE']._serialized_start=193
-  _globals['_CHATMESSAGE']._serialized_end=241
-  _globals['_EMPTY']._serialized_start=243
-  _globals['_EMPTY']._serialized_end=250
-  _globals['_CHATSERVICE']._serialized_start=253
-  _globals['_CHATSERVICE']._serialized_end=501
+  _globals['_EMPTY']._serialized_start=105
+  _globals['_EMPTY']._serialized_end=112
+  _globals['_MESSAGEREQUEST']._serialized_start=114
+  _globals['_MESSAGEREQUEST']._serialized_end=165
+  _globals['_MESSAGERESPONSE']._serialized_start=167
+  _globals['_MESSAGERESPONSE']._serialized_end=219
+  _globals['_BROADCASTRESPONSE']._serialized_start=221
+  _globals['_BROADCASTRESPONSE']._serialized_end=255
+  _globals['_CHATSERVICE']._serialized_start=258
+  _globals['_CHATSERVICE']._serialized_end=509
 # @@protoc_insertion_point(module_scope)
