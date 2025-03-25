@@ -1,0 +1,37 @@
+# ⛔ Virtual Environment (venv)
+backend/venv/
+
+# ⛔ File hasil kompilasi Python
+backend/__pycache__/
+proto_gen/__pycache__/
+backend/*.pyc
+backend/*.pyo
+
+# ⛔ File hasil kompilasi Protobuf
+backend/proto_gen/
+frontend/src/proto_gen/
+
+# ⛔ Firebase Credentials (Harus tetap aman!)
+backend/grpc-system-integration-firebase-adminsdk-fbsvc-44e0212c60.json
+
+# ⛔ Node Modules (Frontend)
+frontend/node_modules/
+frontend/.vite/
+
+# ⛔ Build files (Frontend)
+frontend/dist/
+frontend/build/
+frontend/.parcel-cache/
+frontend/.next/
+
+# ⛔ Logs & Temporary Files
+*.log
+*.tmp
+*.swp
+*.swo
+*.swn
+.DS_Store
+.env
+
+# ⛔ Envoy Logs
+envoy/*.log
