@@ -36,6 +36,7 @@ def chat_stream(stub, username):
                 break
             yield chat_pb2.MessageRequest(username=username, message=msg)
 
+    # Mendapatkan stream bidirectional
     responses = stub.ChatStream(generate_messages())
 
     try:
@@ -43,7 +44,6 @@ def chat_stream(stub, username):
             print(f"{response.username}: {response.message}")  # Terima pesan dari client lain
     except grpc._channel._Rendezvous:
         print("Chat session ended.")
-
 
 
 if __name__ == "__main__":
