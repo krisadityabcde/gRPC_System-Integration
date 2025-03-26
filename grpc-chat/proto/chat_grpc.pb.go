@@ -4,7 +4,7 @@
 // - protoc             v6.30.1
 // source: proto/chat.proto
 
-package proto
+package __
 
 import (
 	context "context"
@@ -19,24 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChatService_Login_FullMethodName                = "/chat.ChatService/Login"
-	ChatService_StreamUsers_FullMethodName          = "/chat.ChatService/StreamUsers"
-	ChatService_ChatStream_FullMethodName           = "/chat.ChatService/ChatStream"
-	ChatService_SendMultipleMessages_FullMethodName = "/chat.ChatService/SendMultipleMessages"
+	ChatService_Login_FullMethodName        = "/chat.ChatService/Login"
+	ChatService_OnlineStatus_FullMethodName = "/chat.ChatService/OnlineStatus"
+	ChatService_SendMessage_FullMethodName  = "/chat.ChatService/SendMessage"
+	ChatService_ChatStream_FullMethodName   = "/chat.ChatService/ChatStream"
 )
 
 // ChatServiceClient is the client API for ChatService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatServiceClient interface {
-	// Unary RPC
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
-	// Server Streaming RPC
-	StreamUsers(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[UserList], error)
-	// Bidirectional Streaming RPC
+	OnlineStatus(ctx context.Context, in *OnlineStatusRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OnlineStatusResponse], error)
+	SendMessage(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ChatMessage, ChatResponse], error)
 	ChatStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatMessage, ChatMessage], error)
-	// Client Streaming RPC
-	SendMultipleMessages(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ChatMessage, Empty], error)
 }
 
 type chatServiceClient struct {
@@ -57,13 +53,13 @@ func (c *chatServiceClient) Login(ctx context.Context, in *LoginRequest, opts ..
 	return out, nil
 }
 
-func (c *chatServiceClient) StreamUsers(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[UserList], error) {
+func (c *chatServiceClient) OnlineStatus(ctx context.Context, in *OnlineStatusRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OnlineStatusResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], ChatService_StreamUsers_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], ChatService_OnlineStatus_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[Empty, UserList]{ClientStream: stream}
+	x := &grpc.GenericClientStream[OnlineStatusRequest, OnlineStatusResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -74,11 +70,24 @@ func (c *chatServiceClient) StreamUsers(ctx context.Context, in *Empty, opts ...
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ChatService_StreamUsersClient = grpc.ServerStreamingClient[UserList]
+type ChatService_OnlineStatusClient = grpc.ServerStreamingClient[OnlineStatusResponse]
+
+func (c *chatServiceClient) SendMessage(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ChatMessage, ChatResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[1], ChatService_SendMessage_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ChatMessage, ChatResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_SendMessageClient = grpc.ClientStreamingClient[ChatMessage, ChatResponse]
 
 func (c *chatServiceClient) ChatStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatMessage, ChatMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[1], ChatService_ChatStream_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[2], ChatService_ChatStream_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -89,31 +98,14 @@ func (c *chatServiceClient) ChatStream(ctx context.Context, opts ...grpc.CallOpt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatService_ChatStreamClient = grpc.BidiStreamingClient[ChatMessage, ChatMessage]
 
-func (c *chatServiceClient) SendMultipleMessages(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ChatMessage, Empty], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[2], ChatService_SendMultipleMessages_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[ChatMessage, Empty]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ChatService_SendMultipleMessagesClient = grpc.ClientStreamingClient[ChatMessage, Empty]
-
 // ChatServiceServer is the server API for ChatService service.
 // All implementations must embed UnimplementedChatServiceServer
 // for forward compatibility.
 type ChatServiceServer interface {
-	// Unary RPC
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
-	// Server Streaming RPC
-	StreamUsers(*Empty, grpc.ServerStreamingServer[UserList]) error
-	// Bidirectional Streaming RPC
+	OnlineStatus(*OnlineStatusRequest, grpc.ServerStreamingServer[OnlineStatusResponse]) error
+	SendMessage(grpc.ClientStreamingServer[ChatMessage, ChatResponse]) error
 	ChatStream(grpc.BidiStreamingServer[ChatMessage, ChatMessage]) error
-	// Client Streaming RPC
-	SendMultipleMessages(grpc.ClientStreamingServer[ChatMessage, Empty]) error
 	mustEmbedUnimplementedChatServiceServer()
 }
 
@@ -127,14 +119,14 @@ type UnimplementedChatServiceServer struct{}
 func (UnimplementedChatServiceServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Login not implemented")
 }
-func (UnimplementedChatServiceServer) StreamUsers(*Empty, grpc.ServerStreamingServer[UserList]) error {
-	return status.Errorf(codes.Unimplemented, "method StreamUsers not implemented")
+func (UnimplementedChatServiceServer) OnlineStatus(*OnlineStatusRequest, grpc.ServerStreamingServer[OnlineStatusResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method OnlineStatus not implemented")
+}
+func (UnimplementedChatServiceServer) SendMessage(grpc.ClientStreamingServer[ChatMessage, ChatResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method SendMessage not implemented")
 }
 func (UnimplementedChatServiceServer) ChatStream(grpc.BidiStreamingServer[ChatMessage, ChatMessage]) error {
 	return status.Errorf(codes.Unimplemented, "method ChatStream not implemented")
-}
-func (UnimplementedChatServiceServer) SendMultipleMessages(grpc.ClientStreamingServer[ChatMessage, Empty]) error {
-	return status.Errorf(codes.Unimplemented, "method SendMultipleMessages not implemented")
 }
 func (UnimplementedChatServiceServer) mustEmbedUnimplementedChatServiceServer() {}
 func (UnimplementedChatServiceServer) testEmbeddedByValue()                     {}
@@ -175,16 +167,23 @@ func _ChatService_Login_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ChatService_StreamUsers_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(Empty)
+func _ChatService_OnlineStatus_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(OnlineStatusRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(ChatServiceServer).StreamUsers(m, &grpc.GenericServerStream[Empty, UserList]{ServerStream: stream})
+	return srv.(ChatServiceServer).OnlineStatus(m, &grpc.GenericServerStream[OnlineStatusRequest, OnlineStatusResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ChatService_StreamUsersServer = grpc.ServerStreamingServer[UserList]
+type ChatService_OnlineStatusServer = grpc.ServerStreamingServer[OnlineStatusResponse]
+
+func _ChatService_SendMessage_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ChatServiceServer).SendMessage(&grpc.GenericServerStream[ChatMessage, ChatResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_SendMessageServer = grpc.ClientStreamingServer[ChatMessage, ChatResponse]
 
 func _ChatService_ChatStream_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(ChatServiceServer).ChatStream(&grpc.GenericServerStream[ChatMessage, ChatMessage]{ServerStream: stream})
@@ -192,13 +191,6 @@ func _ChatService_ChatStream_Handler(srv interface{}, stream grpc.ServerStream) 
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatService_ChatStreamServer = grpc.BidiStreamingServer[ChatMessage, ChatMessage]
-
-func _ChatService_SendMultipleMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ChatServiceServer).SendMultipleMessages(&grpc.GenericServerStream[ChatMessage, Empty]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ChatService_SendMultipleMessagesServer = grpc.ClientStreamingServer[ChatMessage, Empty]
 
 // ChatService_ServiceDesc is the grpc.ServiceDesc for ChatService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -214,19 +206,19 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "StreamUsers",
-			Handler:       _ChatService_StreamUsers_Handler,
+			StreamName:    "OnlineStatus",
+			Handler:       _ChatService_OnlineStatus_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "SendMessage",
+			Handler:       _ChatService_SendMessage_Handler,
+			ClientStreams: true,
 		},
 		{
 			StreamName:    "ChatStream",
 			Handler:       _ChatService_ChatStream_Handler,
 			ServerStreams: true,
-			ClientStreams: true,
-		},
-		{
-			StreamName:    "SendMultipleMessages",
-			Handler:       _ChatService_SendMultipleMessages_Handler,
 			ClientStreams: true,
 		},
 	},
