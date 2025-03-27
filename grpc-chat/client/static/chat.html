@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gRPC Terminal Chatroom</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Courier New', monospace;
+        }
+
+        body {
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .terminal-window {
+            border: 2px solid #fff;
+            width: 900px;
+            height: 600px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            max-height: 600px; /* Set maximum height */
+            overflow: hidden; /* Prevent window from expanding */
+        }
+
+        .terminal-content {
+            display: flex;
+            flex-direction: row;
+            flex: 1;
+            margin-bottom: 10px;
+            padding: 0;
+            min-height: auto;
+            width: 100%; 
+            max-height: calc(100% - 50px); /* Account for input box */
+            overflow: hidden; /* Prevent content from expanding */
+        }
+
+        .chat-area {
+            flex: 3; 
+            border: 1px solid #fff;
+            display: flex;
+            flex-direction: column;
+            margin-right: 10px;
+            min-width: 0; 
+            max-height: 100%; /* Ensure it doesn't grow beyond container */
+            overflow: hidden; /* Prevent area from expanding */
+        }
+
+        .sidebar {
+            flex: 1; 
+            display: flex;
+            flex-direction: column;
+            min-width: 0; 
+        }
+
+        .profile-image {
+            border: 1px solid #fff;
+            height: 216px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .profile-image img {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .active-users {
+            flex: 1;
+            border: 1px solid #fff;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .active-users h3 {
+            text-align: center;
+            border-bottom: 1px dashed #fff;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+
+        .user-item {
+            padding: 5px;
+            border-bottom: 1px dotted #555;
+            color: #0f0;
+        }
+
+        .chat-header {
+            border-bottom: 1px solid #fff;
+            padding: 5px;
+            background-color: #000;
+        }
+
+        .chat-title {
+            text-align: center;
+            padding: 5px 0;
+            border-top: 1px dashed #fff;
+            border-bottom: 1px dashed #fff;
+        }
+
+        .terminal-chat-box {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto; /* Enable vertical scrolling */
+            color: #fff; /* Changed from #0f0 (green) to #fff (white) */
+            background-color: rgba(0, 0, 0, 0.7);
+            border: none;
+            word-wrap: break-word; /* Ensure long words don't break layout */
+            max-height: 100%; /* Ensure it uses all available space but doesn't grow */
+        }
+
+        /* Add custom scrollbar styling for better appearance */
+        .terminal-chat-box::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .terminal-chat-box::-webkit-scrollbar-track {
+            background: #000;
+        }
+
+        .terminal-chat-box::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 3px;
+        }
+
+        .terminal-chat-box::-webkit-scrollbar-thumb:hover {
+            background: #666;
+        }
+
+        .username-highlight {
+            color: #ff0; /* Yellow */
+            font-weight: bold;
+        }
+
+        .terminal-input-box {
+            display: flex;
+            height: 40px;
+        }
+
+        .terminal-input {
+            flex: 1;
+            background-color: #000;
+            color: #fff;
+            border: 1px solid #fff;
+            padding: 5px 10px;
+            font-size: 14px;
+            outline: none;
+            width: auto;
+            margin-bottom: 0;
+            text-align: left;
+        }
+
+        .control-buttons {
+            display: flex;
+            margin-left: 10px;
+        }
+
+        .terminal-button-send {
+            width: 40px;
+            height: 40px;
+            border: 1px solid #fff;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+
+        .terminal-button-send:hover {
+            background-color: #333;
+        }
+
+        .log-off-button {
+            width: 100px;
+            height: 40px;
+            border: 1px solid #fff;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .log-off-button:hover {
+            background-color: #333;
+        }
+    </style>
+    <!-- Prevent caching -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+</head>
+<body>
+
+    <div class="terminal-window" id="chat-area">
+        <div class="terminal-content">
+            <div class="chat-area">
+                <div class="chat-header">
+                    <div>Date: <span id="current-date">Thursday, 2023-03-21</span> // Time <span id="current-time">04:24 PM</span></div>
+                    <div class="chat-title">========================= gRPC Chat Room =========================</div>
+                </div>
+                <div id="chat-box" class="terminal-chat-box">
+
+                </div>
+            </div>
+            <div class="sidebar">
+                <div class="profile-image">
+                    <img src="/static/img/normal.png" alt="Profile" id="profile-image">
+                </div>
+                <div class="active-users" id="active-users">
+                    <h3>Active Users</h3>
+                    <!-- Active users will be listed here -->
+                </div>
+            </div>
+        </div>
+        <div id="input-box" class="terminal-input-box">
+            <input id="message" type="text" class="terminal-input" placeholder="Type your message...">
+            <div class="control-buttons">
+                <button class="terminal-button-send" onclick="sendMessage()">▶</button>
+                <div class="log-off-button" onclick="logout()">Log OFF</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/chat.js"></script>
+    
+</body>
+</html>
