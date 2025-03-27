@@ -1,189 +1,276 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
-	"sync"
-
-	"context"
+	"os"
+	"strconv"
 	"time"
 
-	pb "grpc-chat/proto"
 	"google.golang.org/grpc"
+	pb "grpc-chat/proto"
 )
 
-var tmpl = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Room</title>
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; }
-        #chat-box { width: 50%; margin: auto; height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; }
-        input, button { margin-top: 10px; }
-    </style>
-</head>
-<body>
-    <h2>Chat Room</h2>
-    <input type="text" id="username" placeholder="Enter your username">
-    <button onclick="login()">Login</button>
-    <div id="online-status"></div>
-    <div id="chat-box"></div>
-    <input type="text" id="message" placeholder="Type a message">
-    <button onclick="sendMessage()">Send</button>
+var client pb.ChatServiceClient
+var username string
+var stream pb.ChatService_ChatStreamClient
+var clientPort int
+var messageChannels []chan *pb.ChatMessage
 
-    <script>
-        let username = "";
-
-        function login() {
-            username = document.getElementById("username").value;
-            fetch("/login?username=" + username)
-                .then(res => res.text())
-                .then(msg => {
-                    alert(msg);
-                    startOnlineStatus();
-                });
-        }
-
-        function startOnlineStatus() {
-            const eventSource = new EventSource("/online-status");
-            eventSource.onmessage = function(event) {
-                document.getElementById("online-status").innerText = event.data;
-            };
-        }
-
-        function sendMessage() {
-            const message = document.getElementById("message").value;
-            fetch("/send?username=" + username + "&message=" + message)
-                .then(res => res.text())
-                .then(msg => {
-                    document.getElementById("chat-box").innerHTML += "<p><b>" + username + ":</b> " + message + "</p>";
-                    document.getElementById("message").value = "";
-                });
-        }
-    </script>
-</body>
-</html>
-`
-
-type Client struct {
-	conn   *grpc.ClientConn
-	client pb.ChatServiceClient
-	mu     sync.Mutex
-	users  []string
-}
-
-func NewClient() *Client {
-	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure())
+// Ambil port unik untuk client baru
+func getNextClientPort() int {
+	data, err := os.ReadFile("client_count.txt")
 	if err != nil {
-		log.Fatalf("Failed to connect: %v", err)
+		os.WriteFile("client_count.txt", []byte("0"), 0644)
+		return 8080
 	}
 
-	return &Client{
-		conn:   conn,
-		client: pb.NewChatServiceClient(conn),
-		users:  []string{},
-	}
+	count, _ := strconv.Atoi(string(data))
+	nextPort := 8080 + count
+
+	os.WriteFile("client_count.txt", []byte(strconv.Itoa(count+1)), 0644)
+
+	return nextPort
 }
 
-func (c *Client) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	username := r.URL.Query().Get("username")
+// Tampilkan UI
+func renderHTML(w http.ResponseWriter, r *http.Request) {
+	tmpl := `
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>Chat Room</title>
+		<style>
+			body { font-family: Arial, sans-serif; text-align: center; }
+			#chat-box { width: 400px; height: 300px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; margin: auto; text-align: left; }
+			#input-box { margin-top: 10px; }
+			#input-box input { width: 300px; padding: 5px; }
+			#input-box button { padding: 5px; }
+		</style>
+	</head>
+	<body>
+		<h2>Chat Room (Port: {{.Port}})</h2>
+		<div id="login-box">
+			<input id="username" type="text" placeholder="Enter username" />
+			<button onclick="login()">Login</button>
+		</div>
 
-	_, err := c.client.Login(context.Background(), &pb.LoginRequest{Username: username})
+		<div id="chat-area" style="display:none;">
+			<div id="chat-box"></div>
+			<div id="input-box">
+				<input id="message" type="text" placeholder="Type a message..." />
+				<button onclick="sendMessage()">Send</button>
+			</div>
+		</div>
+
+		<script>
+			let username = "";
+			let eventSource;
+			let lastMessage = "";
+
+			async function login() {
+				let input = document.getElementById("username");
+				let response = await fetch("/login?username=" + input.value);
+				let result = await response.json();
+				if (result.username) {
+					username = result.username;
+					document.getElementById("login-box").style.display = "none";
+					document.getElementById("chat-area").style.display = "block";
+					startChat();
+				} else {
+					alert("Login failed");
+				}
+			}
+
+			function startChat() {
+				eventSource = new EventSource("/stream");
+				eventSource.onmessage = (event) => {
+					let msg = event.data;
+					if (!isMessageDuplicate(msg)) {
+						addMessageToChat(msg);
+					}
+				};
+			}
+
+			function sendMessage() {
+				let input = document.getElementById("message");
+				let messageText = input.value.trim();
+
+				if (messageText !== "") {
+					let formattedMessage = "[" + getCurrentTime() + "] " + username + ": " + messageText;
+					
+					// Cegah duplikasi di sisi client
+					if (!isMessageDuplicate(formattedMessage)) {
+						addMessageToChat(formattedMessage);
+					}
+					
+					fetch("/send?username=" + username + "&message=" + messageText);
+					input.value = "";
+				}
+			}
+
+			function addMessageToChat(message) {
+				let chatBox = document.getElementById("chat-box");
+				let messageElement = document.createElement("p");
+				messageElement.textContent = message;
+				chatBox.appendChild(messageElement);
+				chatBox.scrollTop = chatBox.scrollHeight;
+			}
+
+			function isMessageDuplicate(message) {
+				if (message === lastMessage) {
+					return true;
+				}
+				lastMessage = message;
+				return false;
+			}
+
+			function getCurrentTime() {
+				let now = new Date();
+				return now.getHours().toString().padStart(2, '0') + ":" +
+					now.getMinutes().toString().padStart(2, '0') + ":" +
+					now.getSeconds().toString().padStart(2, '0');
+			}
+		</script>
+	</body>
+	</html>`
+
+	tmplObj := template.Must(template.New("chat").Parse(tmpl))
+	tmplObj.Execute(w, map[string]int{"Port": clientPort})
+}
+
+// Handler login
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	username = r.URL.Query().Get("username")
+
+	resp, err := client.Login(context.Background(), &pb.LoginRequest{Username: username})
 	if err != nil {
-		http.Error(w, "Login failed", http.StatusInternalServerError)
+		http.Error(w, "Login gagal", http.StatusUnauthorized)
 		return
 	}
 
-	c.mu.Lock()
-	c.users = append(c.users, username)
-	c.mu.Unlock()
-
-	fmt.Fprint(w, "Login successful!")
-}
-
-func (c *Client) ChatHandler(w http.ResponseWriter, r *http.Request) {
-	username := r.URL.Query().Get("username")
-
-	// Buat stream dengan server
-	stream, err := c.client.ChatStream(context.Background())
-	if err != nil {
-		http.Error(w, "Failed to start chat stream", http.StatusInternalServerError)
-		return
-	}
-
-	// Kirim pesan dari client ke server secara asynchronous
-	go func() {
-		for {
-			message := r.URL.Query().Get("message")
-			if message == "" {
-				continue
-			}
-
-			err := stream.Send(&pb.ChatMessage{
-				Username:  username,
-				Message:   message,
-				Timestamp: time.Now().Format(time.RFC3339),
-			})
-			if err != nil {
-				log.Println("Error sending message:", err)
-				return
-			}
-			time.Sleep(500 * time.Millisecond) // Hindari pengiriman terlalu cepat
-		}
-	}()
-
-	// Terima pesan dari server dan kirim ke client
-	for {
-		in, err := stream.Recv()
+	// Buat stream untuk chat jika belum ada
+	if stream == nil {
+		stream, err = client.ChatStream(context.Background())
 		if err != nil {
-			http.Error(w, "Error receiving message", http.StatusInternalServerError)
+			http.Error(w, "Tidak bisa streaming chat", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Kirim pesan bahwa user bergabung
+	err = stream.Send(&pb.ChatMessage{Sender: username, Message: "joined the chat", Timestamp: time.Now().Format("15:04:05")})
+	if err != nil {
+		http.Error(w, "Gagal mengirim pesan ke server", http.StatusInternalServerError)
+		return
+	}
+
+	// Jalankan goroutine untuk menerima pesan dari server
+	go receiveMessages()
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"username":"%s","message":"%s"}`, resp.Username, resp.Message)
+}
+
+// Handler untuk mengirim pesan
+func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
+	msg := r.URL.Query().Get("message")
+
+	if stream == nil {
+		http.Error(w, "Anda belum login", http.StatusUnauthorized)
+		return
+	}
+
+	chatMessage := &pb.ChatMessage{
+		Sender:    username,
+		Message:   msg,
+		Timestamp: time.Now().Format("15:04:05"),
+	}
+
+	// Kirim pesan ke server
+	err := stream.Send(chatMessage)
+	if err != nil {
+		http.Error(w, "Gagal mengirim pesan", http.StatusInternalServerError)
+		return
+	}
+
+	// Kirim pesan ke semua client
+	for _, ch := range messageChannels {
+		ch <- chatMessage
+	}
+}
+
+
+// Fungsi untuk menerima pesan dari server
+func receiveMessages() {
+	for {
+		if stream == nil {
+			log.Println("Stream belum tersedia")
 			return
 		}
 
-		fmt.Fprintf(w, "%s [%s]: %s\n", in.Username, in.Timestamp, in.Message)
+		msg, err := stream.Recv()
+		if err != nil {
+			log.Println("Gagal menerima pesan:", err)
+			return
+		}
+
+		// Kirim ke semua client yang mendengarkan /stream
+		for _, ch := range messageChannels {
+			ch <- msg
+		}
 	}
 }
 
-func (c *Client) OnlineStatusHandler(w http.ResponseWriter, r *http.Request) {
+
+// Streaming ke UI untuk semua client
+func streamMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	stream, err := c.client.OnlineStatus(context.Background(), &pb.OnlineStatusRequest{})
-	if err != nil {
-		http.Error(w, "Failed to start online status stream", http.StatusInternalServerError)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming tidak didukung", http.StatusInternalServerError)
 		return
 	}
 
-	for {
-		resp, err := stream.Recv()
-		if err != nil {
-			break
+	// Buat channel khusus untuk client ini
+	msgChannel := make(chan *pb.ChatMessage, 100)
+	messageChannels = append(messageChannels, msgChannel)
+
+	// Hapus channel saat client disconnect
+	defer func() {
+		for i, ch := range messageChannels {
+			if ch == msgChannel {
+				messageChannels = append(messageChannels[:i], messageChannels[i+1:]...)
+				break
+			}
 		}
-		fmt.Fprintf(w, "data: %s is online: %v\n\n", resp.Username, resp.Online)
-		w.(http.Flusher).Flush()
+		close(msgChannel)
+	}()
+
+	// Kirim pesan yang diterima ke client ini
+	for msg := range msgChannel {
+		fmt.Fprintf(w, "data: [%s] %s: %s\n\n", msg.Timestamp, msg.Sender, msg.Message)
+		flusher.Flush()
 	}
 }
 
-func (c *Client) ServeHTML(w http.ResponseWriter, r *http.Request) {
-	t := template.Must(template.New("chat").Parse(tmpl))
-	t.Execute(w, nil)
-}
 
 func main() {
-	client := NewClient()
-	defer client.conn.Close()
+	clientPort = getNextClientPort()
+	conn, _ := grpc.Dial("localhost:50051", grpc.WithInsecure())
+	client = pb.NewChatServiceClient(conn)
 
-	http.HandleFunc("/", client.ServeHTML)
-	http.HandleFunc("/login", client.LoginHandler)
-	http.HandleFunc("/send", client.ChatHandler)
-	http.HandleFunc("/online-status", client.OnlineStatusHandler)
+	http.HandleFunc("/", renderHTML)
+	http.HandleFunc("/login", loginHandler)
+	http.HandleFunc("/send", sendMessageHandler)
+	http.HandleFunc("/stream", streamMessagesHandler)
 
-	fmt.Println("Client running on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Printf("Client berjalan di http://localhost:%d", clientPort)
+	http.ListenAndServe(fmt.Sprintf(":%d", clientPort), nil)
 }

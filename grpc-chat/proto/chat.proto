@@ -1,36 +1,24 @@
 syntax = "proto3";
 
-package chat;
+package grpcchat;
 option go_package = ".";
 
 service ChatService {
-  rpc Login(LoginRequest) returns (LoginResponse); // Unary gRPC
-  rpc OnlineStatus(OnlineStatusRequest) returns (stream OnlineStatusResponse); // Server Streaming
-  rpc SendMessage(stream ChatMessage) returns (ChatResponse); // Client Streaming (ditunda)
-  rpc ChatStream(stream ChatMessage) returns (stream ChatMessage); // Bidirectional Streaming
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
 }
 
 message LoginRequest {
-  string username = 1;
+    string username = 1;
 }
 
 message LoginResponse {
-  string message = 1;
-}
-
-message OnlineStatusRequest {}
-
-message OnlineStatusResponse {
-  string username = 1;
-  bool online = 2;
+    string username = 1;
+    string message = 2;
 }
 
 message ChatMessage {
-  string username = 1;
-  string message = 2;
-  string timestamp = 3;
-}
-
-message ChatResponse {
-  string message = 1;
+    string sender = 1;
+    string message = 2;
+    string timestamp = 3;
 }
