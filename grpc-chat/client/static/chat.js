@@ -125,7 +125,13 @@ function startChat() {
     
     // Add a timestamp to prevent caching
     const timestamp = new Date().getTime();
-    const clientId = generateClientId(); // Generate a unique client ID
+    const clientId = getCookie('client_id') || generateClientId(); // Get client ID from cookie or generate
+    
+    // If we generated a new client ID, store it for future use
+    if (!getCookie('client_id')) {
+        document.cookie = `client_id=${clientId}; path=/; max-age=${60*60*24}`;
+    }
+    
     eventSource = new EventSource(`/stream?t=${timestamp}&clientId=${clientId}`);
     
     // Debug any messages coming through
@@ -139,12 +145,16 @@ function startChat() {
         }
         
         console.log("Message received:", msg);
-        addMessageToChat(msg);
+        
+        // Check if this is our own message to avoid sender confusion
+        const messageUsername = extractUsernameFromMessage(msg);
+        
+        // Add to chat display
+        addMessageToChat(msg, false, messageUsername === username);
         
         // Extract username from message format: <username> message
-        const match = msg.match(/<([^>]+)>/);
-        if (match && match[1]) {
-            addActiveUser(match[1].trim());
+        if (messageUsername) {
+            addActiveUser(messageUsername);
         }
     });
     
@@ -189,9 +199,110 @@ function startChat() {
     setInterval(fetchActiveUsers, 3000); // Check every 3 seconds
 }
 
+// Improved function to extract username from message
+function extractUsernameFromMessage(message) {
+    const match = message.match(/<([^>]+)>/);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    return null;
+}
+
+// Improved function to help debug message flow
+function addMessageToChat(message, isLocalEcho = false, isOwnMessage = false) {
+    console.log(`Adding message to chat box: ${message} (local echo: ${isLocalEcho}, own message: ${isOwnMessage})`);
+    
+    // Get the chat box element
+    let chatBox = document.getElementById("chat-box");
+    if (!chatBox) {
+        console.error("CRITICAL ERROR: Chat box element not found!");
+        alert("Error: Chat box not found. Please refresh the page.");
+        return;
+    }
+    
+    // If this is a non-local echo that matches a local echo, skip it
+    if (!isLocalEcho && localEchoMessages.has(message)) {
+        console.log(`Skipping duplicate message that was already echoed locally: ${message}`);
+        return;
+    }
+    
+    // Add message timestamp for debugging
+    const timestamp = new Date().toLocaleTimeString();
+    console.log(`[${timestamp}] Processing message: ${message}`);
+    
+    // Create a new message element
+    let messageElement = document.createElement("p");
+    messageElement.style.marginBottom = "5px";
+    
+    // If it's a local echo, mark it as such
+    if (isLocalEcho) {
+        messageElement.setAttribute('data-local-echo', 'true');
+        localEchoMessages.add(message);
+    }
+    
+    try {
+        // Try to parse the username format <username> message
+        const usernameMatch = message.match(/^<([^>]+)>/);
+        if (usernameMatch) {
+            const extractedUsername = usernameMatch[1];
+            const messageContent = message.substring(usernameMatch[0].length).trim();
+            
+            console.log(`Formatted message - Username: ${extractedUsername}, Content: ${messageContent}`);
+            
+            // Check if this is a "left the chat" message
+            if (messageContent === "left the chat") {
+                console.log(`User ${extractedUsername} has left the chat`);
+                removeActiveUser(extractedUsername);
+                
+                // Add with special style
+                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> <span style="color: #f55;">${messageContent}</span>`;
+            } else if (messageContent === "left the chat (client shutdown)") {
+                console.log(`User ${extractedUsername} has left the chat`);
+                removeActiveUser(extractedUsername);
+                
+                // Add with special style
+                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> <span style="color: #f55;">${messageContent}</span>`; 
+            }
+            else {
+                // Regular message
+                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> ${messageContent}`;
+                
+                // Any user who sends a message is active - add them to active users
+                if (extractedUsername && extractedUsername !== "System") {
+                    addActiveUser(extractedUsername);
+                }
+            }
+        } else {
+            // Just add as plain text
+            console.log("No username pattern found, using plain text");
+            messageElement.textContent = message;
+        }
+        
+        // Add to chat box
+        chatBox.appendChild(messageElement);
+        
+        // Force scroll to bottom
+        chatBox.scrollTop = chatBox.scrollHeight;
+        
+        console.log("Message added successfully!");
+    } catch (error) {
+        console.error("Error processing message:", error);
+        // Fallback: add as plain text
+        messageElement.textContent = message;
+        chatBox.appendChild(messageElement);
+    }
+}
+
 // Generate a unique client ID
 function generateClientId() {
-    return 'client_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
+    const existingId = localStorage.getItem('chat_client_id');
+    if (existingId) {
+        return existingId;
+    }
+    
+    const newId = 'client_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
+    localStorage.setItem('chat_client_id', newId);
+    return newId;
 }
 
 // Add window event handlers to clean up EventSource on page unload
@@ -352,91 +463,6 @@ function removeLocalEcho(message) {
     }
     
     localEchoMessages.delete(message);
-}
-
-// Improved function to help debug message flow
-function addMessageToChat(message, isLocalEcho = false) {
-    console.log(`Adding message to chat box: ${message} (local echo: ${isLocalEcho})`);
-    
-    // Get the chat box element
-    let chatBox = document.getElementById("chat-box");
-    if (!chatBox) {
-        console.error("CRITICAL ERROR: Chat box element not found!");
-        alert("Error: Chat box not found. Please refresh the page.");
-        return;
-    }
-    
-    // If this is a non-local echo that matches a local echo, skip it
-    if (!isLocalEcho && localEchoMessages.has(message)) {
-        console.log(`Skipping duplicate message that was already echoed locally: ${message}`);
-        return;
-    }
-    
-    // Add message timestamp for debugging
-    const timestamp = new Date().toLocaleTimeString();
-    console.log(`[${timestamp}] Processing message: ${message}`);
-    
-    // Create a new message element
-    let messageElement = document.createElement("p");
-    messageElement.style.marginBottom = "5px";
-    
-    // If it's a local echo, mark it as such
-    if (isLocalEcho) {
-        messageElement.setAttribute('data-local-echo', 'true');
-        localEchoMessages.add(message);
-    }
-    
-    try {
-        // Try to parse the username format <username> message
-        const usernameMatch = message.match(/^<([^>]+)>/);
-        if (usernameMatch) {
-            const extractedUsername = usernameMatch[1];
-            const messageContent = message.substring(usernameMatch[0].length).trim();
-            
-            console.log(`Formatted message - Username: ${extractedUsername}, Content: ${messageContent}`);
-            
-            // Check if this is a "left the chat" message
-            if (messageContent === "left the chat") {
-                console.log(`User ${extractedUsername} has left the chat`);
-                removeActiveUser(extractedUsername);
-                
-                // Add with special style
-                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> <span style="color: #f55;">${messageContent}</span>`;
-            } else if (messageContent === "left the chat (client shutdown)") {
-                console.log(`User ${extractedUsername} has left the chat`);
-                removeActiveUser(extractedUsername);
-                
-                // Add with special style
-                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> <span style="color: #f55;">${messageContent}</span>`; 
-            }
-            else {
-                // Regular message
-                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> ${messageContent}`;
-                
-                // Any user who sends a message is active - add them to active users
-                if (extractedUsername && extractedUsername !== "System") {
-                    addActiveUser(extractedUsername);
-                }
-            }
-        } else {
-            // Just add as plain text
-            console.log("No username pattern found, using plain text");
-            messageElement.textContent = message;
-        }
-        
-        // Add to chat box
-        chatBox.appendChild(messageElement);
-        
-        // Force scroll to bottom
-        chatBox.scrollTop = chatBox.scrollHeight;
-        
-        console.log("Message added successfully!");
-    } catch (error) {
-        console.error("Error processing message:", error);
-        // Fallback: add as plain text
-        messageElement.textContent = message;
-        chatBox.appendChild(messageElement);
-    }
 }
 
 function getCurrentTime() {

@@ -34,8 +34,9 @@ var userStreams = make(map[string]pb.ChatService_ChatStreamClient) // Each user 
 var activeUserTimestamps = make(map[string]time.Time) // Track last seen times for users
 var activeUsersMutex sync.RWMutex                     // Mutex for thread-safe access
 
-// Global variables for tracking connections
-// Removed redundant declaration of clientMessageChannels
+// Add map to track the client session IDs for more reliable identification
+var clientSessions = make(map[string]string) // Maps cookie ID to clientIP
+var sessionsMutex sync.RWMutex               // Mutex for thread-safe access to sessions
 
 // Add a mutex for the processedMessages map to prevent concurrent access
 var (
@@ -46,6 +47,47 @@ var (
 // Generate a unique ID for messages
 func generateMessageID(sender, message, timestamp string) string {
 	return fmt.Sprintf("%s_%s_%s", sender, message, timestamp)
+}
+
+// Extract client identifier from request using cookies first, then IP as fallback
+func getClientIdentifier(r *http.Request) string {
+	// First try to get the client ID from cookie
+	cookie, err := r.Cookie("client_id")
+	if err == nil && cookie != nil && cookie.Value != "" {
+		sessionsMutex.RLock()
+		clientIP, exists := clientSessions[cookie.Value]
+		sessionsMutex.RUnlock()
+
+		if exists {
+			return clientIP
+		}
+	}
+
+	// Fallback to IP address
+	return r.RemoteAddr
+}
+
+// Create a new session ID for a client
+func createClientSession(w http.ResponseWriter, clientIP string) string {
+	sessionID := fmt.Sprintf("session_%d_%s", time.Now().UnixNano(), clientIP)
+
+	// Store the mapping between session ID and client IP
+	sessionsMutex.Lock()
+	clientSessions[sessionID] = clientIP
+	sessionsMutex.Unlock()
+
+	// Set a cookie with the session ID
+	cookie := &http.Cookie{
+		Name:     "client_id",
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   3600 * 24, // 1 day
+	}
+	http.SetCookie(w, cookie)
+
+	log.Printf("Created new session ID %s for client %s", sessionID, clientIP)
+	return sessionID
 }
 
 // Ambil port unik untuk client baru
@@ -95,8 +137,14 @@ func getClientDir() string {
 
 // Tampilkan UI
 func renderHTML(w http.ResponseWriter, r *http.Request) {
-	// Get client IP or other unique identifier
-	clientIP := r.RemoteAddr
+	// Get client identifier
+	clientIP := getClientIdentifier(r)
+
+	// Create a session if one doesn't exist
+	_, err := r.Cookie("client_id")
+	if err != nil {
+		createClientSession(w, clientIP)
+	}
 
 	// Check for cookie-based authentication instead of IP
 	cookie, err := r.Cookie("username")
@@ -147,7 +195,13 @@ func renderHTML(w http.ResponseWriter, r *http.Request) {
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	// Don't store in global variable, just get from request
 	loginUsername := r.URL.Query().Get("username")
-	clientIP := r.RemoteAddr
+	clientIP := getClientIdentifier(r)
+
+	// Create a client session if one doesn't exist
+	sessionCookie, err := r.Cookie("client_id")
+	if err != nil || sessionCookie == nil || sessionCookie.Value == "" {
+		createClientSession(w, clientIP)
+	}
 
 	log.Printf("Login attempt from %s with username: %s", clientIP, loginUsername)
 
@@ -183,7 +237,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	// Mark user as logged in
 	loggedInUsers[clientIP] = true
 
-	// Set a cookie to track login state
+	// Set a cookie to track login state with the username
 	cookie := &http.Cookie{
 		Name:     "username",
 		Value:    loginUsername,
@@ -193,7 +247,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, cookie)
 
-	log.Printf("User %s logged in successfully from %s", loginUsername, clientIP)
+	log.Printf("User %s logged in successfully from client %s", loginUsername, clientIP)
 	log.Printf("Current logged in users: %v", usernames)
 
 	// Update active users when someone logs in
@@ -311,10 +365,10 @@ func receiveMessages() {
 // Handler untuk mengirim pesan
 func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	msg := r.URL.Query().Get("message")
-	clientIP := r.RemoteAddr
+	clientIP := getClientIdentifier(r)
 
 	// Log that we're handling a message
-	log.Printf("Handling message request from %s", clientIP)
+	log.Printf("Handling message request from client %s", clientIP)
 
 	// Get correct username for this specific client
 	sender, ok := usernames[clientIP]
@@ -325,15 +379,16 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 			sender = cookie.Value
 			// Update the mapping for next time
 			usernames[clientIP] = sender
+			log.Printf("Retrieved username %s from cookie for client %s", sender, clientIP)
 		} else {
 			// Return an error if we can't identify the user
-			log.Printf("Could not identify user for %s", clientIP)
+			log.Printf("Could not identify user for client %s", clientIP)
 			http.Error(w, "User not authenticated", http.StatusUnauthorized)
 			return
 		}
 	}
 
-	log.Printf("Message from %s (IP: %s): %s", sender, clientIP, msg)
+	log.Printf("Message from %s (Client: %s): %s", sender, clientIP, msg)
 
 	// Get the stream for this client
 	stream, ok := userStreams[clientIP]
@@ -374,23 +429,6 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// IMPORTANT: Also deliver the message locally to ensure the sender sees it
-	// But don't mark it as a duplicate since we want it to be received from the server too
-	go func() {
-		// Add slight delay to let the local UI update first
-		time.Sleep(50 * time.Millisecond)
-
-		// Broadcast directly to the sender's channel
-		if senderChannel, exists := clientMessageChannels[clientIP]; exists && senderChannel != nil {
-			select {
-			case senderChannel <- chatMessage:
-				log.Printf("Local message echo sent to sender %s", sender)
-			default:
-				log.Printf("Failed to send local echo to sender %s", sender)
-			}
-		}
-	}()
-
 	log.Printf("Message sent successfully from %s with timestamp %s", sender, timestamp)
 
 	// Mark this user as active when they send a message
@@ -423,9 +461,13 @@ func streamMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log client connection
-	clientIP := r.RemoteAddr
-	log.Printf("New SSE connection from %s", clientIP)
+	// Get client identifier from cookie or IP
+	clientIP := getClientIdentifier(r)
+
+	// Get username for this client to verify message ownership
+	clientUsername := usernames[clientIP]
+
+	log.Printf("New SSE connection from client %s (username: %s)", clientIP, clientUsername)
 
 	// Check if this client already has a channel and close the old one
 	if existingChannel, found := clientMessageChannels[clientIP]; found {
@@ -447,7 +489,7 @@ func streamMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	// Test message directly to browser
 	fmt.Fprintf(w, "data: <System> Connection established\n\n")
 	flusher.Flush()
-	log.Printf("Test message sent directly to %s", clientIP)
+	log.Printf("Test message sent directly to client %s", clientIP)
 
 	// Immediately send another test message after a small delay
 	time.Sleep(200 * time.Millisecond)
@@ -501,7 +543,7 @@ func streamMessagesHandler(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case msg, ok := <-msgChannel:
 			if !ok {
-				log.Printf("Message channel closed for %s", clientIP)
+				log.Printf("Message channel closed for client %s", clientIP)
 				return
 			}
 
@@ -516,18 +558,18 @@ func streamMessagesHandler(w http.ResponseWriter, r *http.Request) {
 
 			_, err := fmt.Fprint(w, chatMsg)
 			if err != nil {
-				log.Printf("Error sending message to %s: %v", clientIP, err)
+				log.Printf("Error sending message to client %s: %v", clientIP, err)
 				return
 			}
 			flusher.Flush()
-			log.Printf("Message flushed to %s", clientIP)
+			log.Printf("Message flushed to client %s", clientIP)
 		}
 	}
 }
 
 // Add a logout handler to properly handle user logout
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
-	clientIP := r.RemoteAddr
+	clientIP := getClientIdentifier(r)
 	loggedInUsername := usernames[clientIP]
 
 	// Close the gRPC stream for this client if it exists
@@ -582,7 +624,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 
 // Add a check-session handler
 func checkSessionHandler(w http.ResponseWriter, r *http.Request) {
-	clientIP := r.RemoteAddr
+	clientIP := getClientIdentifier(r)
 	isLoggedIn := loggedInUsers[clientIP]
 
 	log.Printf("Session check for %s: logged in = %v", clientIP, isLoggedIn)
