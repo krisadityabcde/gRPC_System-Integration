@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal Chat Interface</title>
+    <link rel="stylesheet" type="text/css" href="/static/style.css">
+</head>
+<body>
+    <!-- Boot sequence overlay -->
+    <div class="boot-sequence" id="bootSequence"></div>
+
+    <div class="terminal-window">
+        <div class="terminal-header">
+            <div class="terminal-title">Chat Room (Port: {{.Port}})</div>
+            <div class="terminal-buttons">
+                <div class="terminal-button"></div>
+                <div class="terminal-button"></div>
+            </div>
+        </div>
+        
+        <!-- Login Box -->
+        <div class="terminal-content" id="login-box">
+            <div class="terminal-label">Enter Username</div>
+            <input type="text" class="terminal-input" id="username" placeholder="Enter username" spellcheck="false">
+            <button class="terminal-button-login" onclick="login()">Login</button>
+        </div>
+
+        <!-- Chat Area -->
+        <div id="chat-area" class="chat-terminal-content" style="display:none;">
+            <div id="chat-box" class="terminal-chat-box"></div>
+            <div id="input-box" class="terminal-input-box">
+                <input id="message" type="text" class="terminal-input" placeholder="Type a message..." />
+                <button class="terminal-button-send" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+        
+        <div class="terminal-footer">REF's System Integration Program</div>
+    </div>
+
+    <!-- Include script -->
+    <script src="/static/chat.js"></script>
+    <script>
+        // Check if a session cookie exists and reload if needed
+        window.addEventListener('load', function() {
+            // Check if there's an active chat session
+            fetch("/check-session", { credentials: 'same-origin' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.loggedIn) {
+                        window.location.reload();
+                    }
+                })
+                .catch(error => {
+                    console.error("Session check failed:", error);
+                });
+        });
+    </script>
+</body>
+</html>
