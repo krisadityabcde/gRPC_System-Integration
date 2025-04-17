@@ -177,6 +177,138 @@ func (x *ChatMessage) GetTimestamp() string {
 	return ""
 }
 
+type OnlineUser struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OnlineUser) Reset() {
+	*x = OnlineUser{}
+	mi := &file_proto_chat_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OnlineUser) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OnlineUser) ProtoMessage() {}
+
+func (x *OnlineUser) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chat_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OnlineUser.ProtoReflect.Descriptor instead.
+func (*OnlineUser) Descriptor() ([]byte, []int) {
+	return file_proto_chat_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *OnlineUser) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type TypingRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	IsTyping      bool                   `protobuf:"varint,2,opt,name=is_typing,json=isTyping,proto3" json:"is_typing,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TypingRequest) Reset() {
+	*x = TypingRequest{}
+	mi := &file_proto_chat_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TypingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TypingRequest) ProtoMessage() {}
+
+func (x *TypingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chat_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TypingRequest.ProtoReflect.Descriptor instead.
+func (*TypingRequest) Descriptor() ([]byte, []int) {
+	return file_proto_chat_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TypingRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *TypingRequest) GetIsTyping() bool {
+	if x != nil {
+		return x.IsTyping
+	}
+	return false
+}
+
+type Empty struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Empty) Reset() {
+	*x = Empty{}
+	mi := &file_proto_chat_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Empty) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Empty) ProtoMessage() {}
+
+func (x *Empty) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chat_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Empty.ProtoReflect.Descriptor instead.
+func (*Empty) Descriptor() ([]byte, []int) {
+	return file_proto_chat_proto_rawDescGZIP(), []int{5}
+}
+
 var File_proto_chat_proto protoreflect.FileDescriptor
 
 const file_proto_chat_proto_rawDesc = "" +
@@ -190,11 +322,20 @@ const file_proto_chat_proto_rawDesc = "" +
 	"\vChatMessage\x12\x16\n" +
 	"\x06sender\x18\x01 \x01(\tR\x06sender\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp2\x87\x01\n" +
+	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"(\n" +
+	"\n" +
+	"OnlineUser\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\"H\n" +
+	"\rTypingRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x1b\n" +
+	"\tis_typing\x18\x02 \x01(\bR\bisTyping\"\a\n" +
+	"\x05Empty2\xfb\x01\n" +
 	"\vChatService\x128\n" +
 	"\x05Login\x12\x16.grpcchat.LoginRequest\x1a\x17.grpcchat.LoginResponse\x12>\n" +
 	"\n" +
-	"ChatStream\x12\x15.grpcchat.ChatMessage\x1a\x15.grpcchat.ChatMessage(\x010\x01B\x03Z\x01.b\x06proto3"
+	"ChatStream\x12\x15.grpcchat.ChatMessage\x1a\x15.grpcchat.ChatMessage(\x010\x01\x126\n" +
+	"\vOnlineUsers\x12\x0f.grpcchat.Empty\x1a\x14.grpcchat.OnlineUser0\x01\x12:\n" +
+	"\fTypingStatus\x12\x17.grpcchat.TypingRequest\x1a\x0f.grpcchat.Empty(\x01B\x03Z\x01.b\x06proto3"
 
 var (
 	file_proto_chat_proto_rawDescOnce sync.Once
@@ -208,19 +349,26 @@ func file_proto_chat_proto_rawDescGZIP() []byte {
 	return file_proto_chat_proto_rawDescData
 }
 
-var file_proto_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_proto_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_proto_chat_proto_goTypes = []any{
 	(*LoginRequest)(nil),  // 0: grpcchat.LoginRequest
 	(*LoginResponse)(nil), // 1: grpcchat.LoginResponse
 	(*ChatMessage)(nil),   // 2: grpcchat.ChatMessage
+	(*OnlineUser)(nil),    // 3: grpcchat.OnlineUser
+	(*TypingRequest)(nil), // 4: grpcchat.TypingRequest
+	(*Empty)(nil),         // 5: grpcchat.Empty
 }
 var file_proto_chat_proto_depIdxs = []int32{
 	0, // 0: grpcchat.ChatService.Login:input_type -> grpcchat.LoginRequest
 	2, // 1: grpcchat.ChatService.ChatStream:input_type -> grpcchat.ChatMessage
-	1, // 2: grpcchat.ChatService.Login:output_type -> grpcchat.LoginResponse
-	2, // 3: grpcchat.ChatService.ChatStream:output_type -> grpcchat.ChatMessage
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
+	5, // 2: grpcchat.ChatService.OnlineUsers:input_type -> grpcchat.Empty
+	4, // 3: grpcchat.ChatService.TypingStatus:input_type -> grpcchat.TypingRequest
+	1, // 4: grpcchat.ChatService.Login:output_type -> grpcchat.LoginResponse
+	2, // 5: grpcchat.ChatService.ChatStream:output_type -> grpcchat.ChatMessage
+	3, // 6: grpcchat.ChatService.OnlineUsers:output_type -> grpcchat.OnlineUser
+	5, // 7: grpcchat.ChatService.TypingStatus:output_type -> grpcchat.Empty
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -237,7 +385,7 @@ func file_proto_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_chat_proto_rawDesc), len(file_proto_chat_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

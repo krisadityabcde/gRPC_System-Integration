@@ -6,6 +6,8 @@ option go_package = ".";
 service ChatService {
     rpc Login(LoginRequest) returns (LoginResponse);
     rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
+    rpc OnlineUsers(Empty) returns (stream OnlineUser); // Server stream for online users
+    rpc TypingStatus(stream TypingRequest) returns (Empty); // Client stream for typing status
 }
 
 message LoginRequest {
@@ -22,3 +24,14 @@ message ChatMessage {
     string message = 2;
     string timestamp = 3;
 }
+
+message OnlineUser {
+    string username = 1;
+}
+
+message TypingRequest {
+    string username = 1;
+    bool is_typing = 2;
+}
+
+message Empty {}

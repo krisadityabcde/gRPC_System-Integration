@@ -19,8 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChatService_Login_FullMethodName      = "/grpcchat.ChatService/Login"
-	ChatService_ChatStream_FullMethodName = "/grpcchat.ChatService/ChatStream"
+	ChatService_Login_FullMethodName        = "/grpcchat.ChatService/Login"
+	ChatService_ChatStream_FullMethodName   = "/grpcchat.ChatService/ChatStream"
+	ChatService_OnlineUsers_FullMethodName  = "/grpcchat.ChatService/OnlineUsers"
+	ChatService_TypingStatus_FullMethodName = "/grpcchat.ChatService/TypingStatus"
 )
 
 // ChatServiceClient is the client API for ChatService service.
@@ -29,6 +31,8 @@ const (
 type ChatServiceClient interface {
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 	ChatStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatMessage, ChatMessage], error)
+	OnlineUsers(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OnlineUser], error)
+	TypingStatus(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TypingRequest, Empty], error)
 }
 
 type chatServiceClient struct {
@@ -62,12 +66,46 @@ func (c *chatServiceClient) ChatStream(ctx context.Context, opts ...grpc.CallOpt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatService_ChatStreamClient = grpc.BidiStreamingClient[ChatMessage, ChatMessage]
 
+func (c *chatServiceClient) OnlineUsers(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OnlineUser], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[1], ChatService_OnlineUsers_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[Empty, OnlineUser]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_OnlineUsersClient = grpc.ServerStreamingClient[OnlineUser]
+
+func (c *chatServiceClient) TypingStatus(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[TypingRequest, Empty], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[2], ChatService_TypingStatus_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TypingRequest, Empty]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_TypingStatusClient = grpc.ClientStreamingClient[TypingRequest, Empty]
+
 // ChatServiceServer is the server API for ChatService service.
 // All implementations must embed UnimplementedChatServiceServer
 // for forward compatibility.
 type ChatServiceServer interface {
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	ChatStream(grpc.BidiStreamingServer[ChatMessage, ChatMessage]) error
+	OnlineUsers(*Empty, grpc.ServerStreamingServer[OnlineUser]) error
+	TypingStatus(grpc.ClientStreamingServer[TypingRequest, Empty]) error
 	mustEmbedUnimplementedChatServiceServer()
 }
 
@@ -83,6 +121,12 @@ func (UnimplementedChatServiceServer) Login(context.Context, *LoginRequest) (*Lo
 }
 func (UnimplementedChatServiceServer) ChatStream(grpc.BidiStreamingServer[ChatMessage, ChatMessage]) error {
 	return status.Errorf(codes.Unimplemented, "method ChatStream not implemented")
+}
+func (UnimplementedChatServiceServer) OnlineUsers(*Empty, grpc.ServerStreamingServer[OnlineUser]) error {
+	return status.Errorf(codes.Unimplemented, "method OnlineUsers not implemented")
+}
+func (UnimplementedChatServiceServer) TypingStatus(grpc.ClientStreamingServer[TypingRequest, Empty]) error {
+	return status.Errorf(codes.Unimplemented, "method TypingStatus not implemented")
 }
 func (UnimplementedChatServiceServer) mustEmbedUnimplementedChatServiceServer() {}
 func (UnimplementedChatServiceServer) testEmbeddedByValue()                     {}
@@ -130,6 +174,24 @@ func _ChatService_ChatStream_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatService_ChatStreamServer = grpc.BidiStreamingServer[ChatMessage, ChatMessage]
 
+func _ChatService_OnlineUsers_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ChatServiceServer).OnlineUsers(m, &grpc.GenericServerStream[Empty, OnlineUser]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_OnlineUsersServer = grpc.ServerStreamingServer[OnlineUser]
+
+func _ChatService_TypingStatus_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ChatServiceServer).TypingStatus(&grpc.GenericServerStream[TypingRequest, Empty]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_TypingStatusServer = grpc.ClientStreamingServer[TypingRequest, Empty]
+
 // ChatService_ServiceDesc is the grpc.ServiceDesc for ChatService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -147,6 +209,16 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "ChatStream",
 			Handler:       _ChatService_ChatStream_Handler,
 			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "OnlineUsers",
+			Handler:       _ChatService_OnlineUsers_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "TypingStatus",
+			Handler:       _ChatService_TypingStatus_Handler,
 			ClientStreams: true,
 		},
 	},
