@@ -126,10 +126,12 @@ function startChat() {
     // Add a timestamp to prevent caching
     const timestamp = new Date().getTime();
     const clientId = getCookie('client_id') || generateClientId(); // Get client ID from cookie or generate
+    const port = window.location.port || '8080'; // Get the current port
     
-    // If we generated a new client ID, store it for future use
+    // If we generated a new client ID, store it for future use (port-specific)
     if (!getCookie('client_id')) {
-        document.cookie = `client_id=${clientId}; path=/; max-age=${60*60*24}`;
+        const portSpecificName = `client_id_port${port}`;
+        document.cookie = `${portSpecificName}=${clientId}; path=/; max-age=${60*60*24}`;
     }
     
     // Use a session-unique ID to track messages from this client
@@ -152,6 +154,7 @@ function startChat() {
         
         // Extract username from message format: <username> message
         const messageUsername = extractUsernameFromMessage(msg);
+        const messageContent = extractMessageContent(msg);
         
         // Get our username directly from cookie every time to ensure consistency
         const currentUsername = getCookie('username');
@@ -168,13 +171,17 @@ function startChat() {
         
         console.log(`Message from ${messageUsername}, currentUsername: ${currentUsername}, isOwn: ${isOwnMessage}`);
         
+        // Process active users list messages - this is the gRPC streamed data
+        if (messageUsername === "System" && messageContent && messageContent.startsWith("Active Users:")) {
+            handleActiveUsersList(messageContent);
+            return;
+        }
+        
+        // Handle user join/leave messages
+        handleUserStatusChange(messageUsername, messageContent);
+        
         // Add to chat display with proper ownership flag
         addMessageToChat(msg, false, isOwnMessage);
-        
-        // Add the sender to active users - explicitly exclude System
-        if (messageUsername && messageUsername !== "System") {
-            addActiveUser(messageUsername);
-        }
     });
     
     // Use explicit open handler for debugging
@@ -212,10 +219,65 @@ function startChat() {
             }
         }
     });
+}
+
+// Extract message content (without username)
+function extractMessageContent(message) {
+    const match = message.match(/^<[^>]+>\s*(.*)/);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    return "";
+}
+
+// Handle active users list messages from the server
+function handleActiveUsersList(message) {
+    console.log("Processing active users list:", message);
     
-    // Fetch active users
-    fetchActiveUsers();
-    setInterval(fetchActiveUsers, 3000); // Check every 3 seconds
+    // Parse the message "Active Users: user1, user2, user3"
+    const usersPart = message.replace("Active Users:", "").trim();
+    
+    // Clear the current active users set
+    activeUsers.clear();
+    
+    // If we have users, split and add them
+    if (usersPart && usersPart !== "") {
+        const usersList = usersPart.split(",").map(user => user.trim());
+        usersList.forEach(user => {
+            if (user !== "System") {
+                addActiveUser(user);
+            }
+        });
+    }
+    
+    // Ensure current user is in the list
+    if (username && username !== "System") {
+        addActiveUser(username);
+    }
+    
+    // Update the UI
+    updateActiveUsersList();
+    console.log("Active users list updated with:", Array.from(activeUsers));
+}
+
+// Handle user status changes (join/leave)
+function handleUserStatusChange(username, messageContent) {
+    if (!username || username === "System") {
+        return;
+    }
+    
+    if (messageContent === "joined the chat") {
+        console.log(`User ${username} has joined`);
+        addActiveUser(username);
+        updateActiveUsersList();
+    } else if (messageContent === "left the chat" || messageContent === "left the chat (client shutdown)") {
+        console.log(`User ${username} has left`);
+        removeActiveUser(username);
+        updateActiveUsersList();
+    } else {
+        // Regular message, ensure user is in active list
+        addActiveUser(username);
+    }
 }
 
 // Improved function to extract username from message
@@ -389,36 +451,6 @@ function logout() {
     }
 }
 
-// Function to fetch active users from the server - improve this function
-function fetchActiveUsers() {
-    fetch('/active-users')
-        .then(response => response.json())
-        .then(data => {
-            console.log("Active users from server:", data.users);
-            
-            // Update the active users set
-            activeUsers.clear();
-            
-            // Add all users from the server's response, excluding System
-            if (data.users && Array.isArray(data.users)) {
-                data.users.forEach(user => {
-                    if (user !== "System") {
-                        activeUsers.add(user);
-                    }
-                });
-            }
-            
-            // Always make sure current user is in the list, unless it's System
-            if (username && username !== "System") {
-                activeUsers.add(username);
-            }
-            
-            // Update the UI with the new list
-            updateActiveUsersList();
-        })
-        .catch(error => console.error('Error fetching active users:', error));
-}
-
 function sendMessage() {
     let input = document.getElementById("message");
     let messageText = input.value.trim();
@@ -578,10 +610,29 @@ function getCurrentTime() {
 let activeUsers = new Set();
 let isTalking = false; // Track which image is currently shown
 
+// Updated to handle port-specific cookies
 function getCookie(name) {
+    // First, try to get the port-specific cookie
+    const portParam = new URLSearchParams(window.location.search).get('port');
+    const port = portParam || window.location.port || '8080'; // Default to 8080 if no port specified
+    
+    // Try port-specific cookie first
+    const portSpecificName = `${name}_port${port}`;
     const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(';').shift();
+    
+    // First check for port-specific cookie
+    let parts = value.split(`; ${portSpecificName}=`);
+    if (parts.length === 2) {
+        return parts.pop().split(';').shift();
+    }
+    
+    // Fallback to regular cookie for backward compatibility
+    parts = value.split(`; ${name}=`);
+    if (parts.length === 2) {
+        return parts.pop().split(';').shift();
+    }
+    
+    return null;
 }
 
 // Function to alternate between normal and talk images
@@ -630,6 +681,14 @@ function updateActiveUsersList() {
         userElement.textContent = user;
         activeUsersElement.appendChild(userElement);
     });
+    
+    // Also ensure current username is included
+    const currentPort = window.location.port || '8080';
+    username = getCookie('username') || "";
+    
+    if (username && username !== "System" && !activeUsers.has(username)) {
+        addActiveUser(username);
+    }
 }
 
 // Event listener for message input
@@ -650,6 +709,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add current user to active users list
     if (username && username !== "System") {
         addActiveUser(username);
+        updateActiveUsersList(); // Make sure to update the UI immediately
     }
     
     // Update date and time
@@ -658,10 +718,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set up image alternating every 1 second
     setInterval(alternateProfileImage, 1000);
-    
-    // Setup periodic update of active users list - check more frequently
-    fetchActiveUsers();
-    setInterval(fetchActiveUsers, 3000); // Check every 3 seconds instead of 5
 });
 
 // Additional script for date/time updates

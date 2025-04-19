@@ -20,11 +20,29 @@ type server struct {
 	streams      map[string]pb.ChatService_ChatStreamServer
 	userStreams  map[string]string // Maps username to stream ID
 	messageCache []*pb.ChatMessage // Cache of recent messages
+
+	// Add tracking for active users and user streams
+	activeUsers       map[string]bool                                   // Track active users by username
+	activeUsersMutex  sync.RWMutex                                      // Mutex for thread-safe access
+	userUpdateStreams map[string]pb.ChatService_ActiveUsersStreamServer // Maps client ID to active users stream
 }
 
 // Login hanya menyimpan username
 func (s *server) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
 	log.Printf("User login: %s", req.Username)
+
+	// Add user to active users list
+	s.activeUsersMutex.Lock()
+	// Check if user already exists before adding them
+	isNewUser := !s.activeUsers[req.Username]
+	s.activeUsers[req.Username] = true
+	s.activeUsersMutex.Unlock()
+
+	// Only broadcast join event if this is a new user
+	if isNewUser {
+		go s.broadcastUserJoin(req.Username)
+	}
+
 	return &pb.LoginResponse{
 		Username: req.Username,
 		Message:  "Login sukses",
@@ -42,6 +60,14 @@ func (s *server) userLeft(username string) {
 
 	// Broadcast the leave message to all clients
 	s.broadcastMessage(leaveMsg)
+
+	// Remove from active users
+	s.activeUsersMutex.Lock()
+	delete(s.activeUsers, username)
+	s.activeUsersMutex.Unlock()
+
+	// Broadcast that user has left
+	go s.broadcastUserLeave(username)
 
 	log.Printf("User %s left the chat", username)
 }
@@ -110,8 +136,105 @@ func (s *server) ChatStream(stream pb.ChatService_ChatStreamServer) error {
 		}
 		s.mu.Unlock()
 
+		// If this is a "joined the chat" message, add user to active users
+		if msg.Message == "joined the chat" {
+			s.activeUsersMutex.Lock()
+			s.activeUsers[msg.Sender] = true
+			s.activeUsersMutex.Unlock()
+
+			// Broadcast to all active user streams
+			go s.broadcastUserJoin(msg.Sender)
+		} else if msg.Message == "left the chat" || msg.Message == "left the chat (client shutdown)" {
+			// If this is a leave message, remove user from active users
+			s.activeUsersMutex.Lock()
+			delete(s.activeUsers, msg.Sender)
+			s.activeUsersMutex.Unlock()
+
+			// Broadcast to all active user streams
+			go s.broadcastUserLeave(msg.Sender)
+		}
+
 		// Broadcast to all connected streams
 		s.broadcastMessage(msg)
+	}
+}
+
+// New method for streaming active users
+func (s *server) ActiveUsersStream(req *pb.ActiveUsersRequest, stream pb.ChatService_ActiveUsersStreamServer) error {
+	// Generate a unique ID for this stream
+	streamID := fmt.Sprintf("active_%p", stream)
+	log.Printf("New active users stream connected for user %s: %s", req.Username, streamID)
+
+	// Register this stream
+	s.mu.Lock()
+	s.userUpdateStreams[streamID] = stream
+	s.mu.Unlock()
+
+	// Clean up on disconnect
+	defer func() {
+		s.mu.Lock()
+		delete(s.userUpdateStreams, streamID)
+		s.mu.Unlock()
+		log.Printf("Active users stream disconnected: %s", streamID)
+	}()
+
+	// Get the current list of active users with proper locking
+	s.activeUsersMutex.RLock()
+	activeUsersList := make([]string, 0, len(s.activeUsers))
+	for user := range s.activeUsers {
+		activeUsersList = append(activeUsersList, user)
+	}
+	s.activeUsersMutex.RUnlock()
+
+	log.Printf("Sending initial active users list to %s: %v", req.Username, activeUsersList)
+
+	// Send initial full list
+	err := stream.Send(&pb.ActiveUsersUpdate{
+		UpdateType: pb.ActiveUsersUpdate_FULL_LIST,
+		Users:      activeUsersList,
+	})
+
+	if err != nil {
+		log.Printf("Error sending initial active users list: %v", err)
+		return err
+	}
+
+	// Keep connection open until client disconnects
+	<-stream.Context().Done()
+	return nil
+}
+
+// Helper function to broadcast user join to all active user streams
+func (s *server) broadcastUserJoin(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	update := &pb.ActiveUsersUpdate{
+		UpdateType: pb.ActiveUsersUpdate_JOIN,
+		Username:   username,
+	}
+
+	for id, userStream := range s.userUpdateStreams {
+		if err := userStream.Send(update); err != nil {
+			log.Printf("Error sending user join update to stream %s: %v", id, err)
+		}
+	}
+}
+
+// Helper function to broadcast user leave to all active user streams
+func (s *server) broadcastUserLeave(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	update := &pb.ActiveUsersUpdate{
+		UpdateType: pb.ActiveUsersUpdate_LEAVE,
+		Username:   username,
+	}
+
+	for id, userStream := range s.userUpdateStreams {
+		if err := userStream.Send(update); err != nil {
+			log.Printf("Error sending user leave update to stream %s: %v", id, err)
+		}
 	}
 }
 
@@ -132,9 +255,11 @@ func (s *server) broadcastMessage(msg *pb.ChatMessage) {
 func main() {
 	// Create and configure server
 	s := &server{
-		streams:      make(map[string]pb.ChatService_ChatStreamServer),
-		userStreams:  make(map[string]string),
-		messageCache: make([]*pb.ChatMessage, 0, 100),
+		streams:           make(map[string]pb.ChatService_ChatStreamServer),
+		userStreams:       make(map[string]string),
+		messageCache:      make([]*pb.ChatMessage, 0, 100),
+		activeUsers:       make(map[string]bool),
+		userUpdateStreams: make(map[string]pb.ChatService_ActiveUsersStreamServer),
 	}
 
 	// Set up gRPC server

@@ -30,9 +30,8 @@ var loggedInUsers = make(map[string]bool)                          // Track logg
 var usernames = make(map[string]string)                            // Maps IP to username
 var userStreams = make(map[string]pb.ChatService_ChatStreamClient) // Each user gets their own stream
 
-// Global variables - add a map for tracking active users across clients
-var activeUserTimestamps = make(map[string]time.Time) // Track last seen times for users
-var activeUsersMutex sync.RWMutex                     // Mutex for thread-safe access
+// Add a global variable for the active users stream
+var activeUsersStream pb.ChatService_ActiveUsersStreamClient
 
 // Add map to track the client session IDs for more reliable identification
 var clientSessions = make(map[string]string) // Maps cookie ID to clientIP
@@ -51,8 +50,8 @@ func generateMessageID(sender, message, timestamp string) string {
 
 // Extract client identifier from request using cookies first, then IP as fallback
 func getClientIdentifier(r *http.Request) string {
-	// First try to get the client ID from cookie
-	cookie, err := r.Cookie("client_id")
+	// First try to get the client ID from port-specific cookie
+	cookie, err := r.Cookie(fmt.Sprintf("client_id_port%d", clientPort))
 	if err == nil && cookie != nil && cookie.Value != "" {
 		sessionsMutex.RLock()
 		clientIP, exists := clientSessions[cookie.Value]
@@ -76,9 +75,9 @@ func createClientSession(w http.ResponseWriter, clientIP string) string {
 	clientSessions[sessionID] = clientIP
 	sessionsMutex.Unlock()
 
-	// Set a cookie with the session ID
+	// Set a cookie with the session ID - make it port-specific
 	cookie := &http.Cookie{
-		Name:     "client_id",
+		Name:     fmt.Sprintf("client_id_port%d", clientPort), // Include port in cookie name
 		Value:    sessionID,
 		Path:     "/",
 		HttpOnly: true,
@@ -86,7 +85,7 @@ func createClientSession(w http.ResponseWriter, clientIP string) string {
 	}
 	http.SetCookie(w, cookie)
 
-	log.Printf("Created new session ID %s for client %s", sessionID, clientIP)
+	log.Printf("Created new session ID %s for client %s on port %d", sessionID, clientIP, clientPort)
 	return sessionID
 }
 
@@ -141,13 +140,13 @@ func renderHTML(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIdentifier(r)
 
 	// Create a session if one doesn't exist
-	_, err := r.Cookie("client_id")
+	_, err := r.Cookie(fmt.Sprintf("client_id_port%d", clientPort))
 	if err != nil {
 		createClientSession(w, clientIP)
 	}
 
-	// Check for cookie-based authentication instead of IP
-	cookie, err := r.Cookie("username")
+	// Check for cookie-based authentication instead of IP - use port-specific cookie
+	cookie, err := r.Cookie(fmt.Sprintf("username_port%d", clientPort))
 	isLoggedIn := loggedInUsers[clientIP] && err == nil && cookie != nil
 
 	log.Printf("Checking login status for client %s: %v (Cookie: %v)", clientIP, isLoggedIn, cookie != nil)
@@ -198,7 +197,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIdentifier(r)
 
 	// Create a client session if one doesn't exist
-	sessionCookie, err := r.Cookie("client_id")
+	sessionCookie, err := r.Cookie(fmt.Sprintf("client_id_port%d", clientPort))
 	if err != nil || sessionCookie == nil || sessionCookie.Value == "" {
 		createClientSession(w, clientIP)
 	}
@@ -237,9 +236,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	// Mark user as logged in
 	loggedInUsers[clientIP] = true
 
-	// Set a cookie to track login state with the username
+	// Set a cookie to track login state with the username - make it port-specific
 	cookie := &http.Cookie{
-		Name:     "username",
+		Name:     fmt.Sprintf("username_port%d", clientPort), // Include port in cookie name
 		Value:    loginUsername,
 		Path:     "/",
 		HttpOnly: false,
@@ -250,10 +249,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("User %s logged in successfully from client %s", loginUsername, clientIP)
 	log.Printf("Current logged in users: %v", usernames)
 
-	// Update active users when someone logs in
-	activeUsersMutex.Lock()
-	activeUserTimestamps[loginUsername] = time.Now()
-	activeUsersMutex.Unlock()
+	// Start streaming active users for this client
+	go startActiveUsersStream(loginUsername)
 
 	// Jalankan goroutine untuk menerima pesan dari this user's stream
 	go receiveMessagesForUser(clientIP, newStream)
@@ -326,22 +323,6 @@ func receiveMessagesForUser(clientIP string, stream pb.ChatService_ChatStreamCli
 
 		log.Printf("RECEIVED FROM SERVER: [%s] %s: %s", msg.Timestamp, msg.Sender, msg.Message)
 
-		// Special handling for "left the chat" messages - remove from active users
-		if msg.Message == "left the chat" {
-			activeUsersMutex.Lock()
-			delete(activeUserTimestamps, msg.Sender)
-			log.Printf("Removed user %s from active users due to 'left the chat' message", msg.Sender)
-			activeUsersMutex.Unlock()
-		} else if msg.Message == "left the chat (client shutdown)" {
-			activeUsersMutex.Lock()
-			delete(activeUserTimestamps, msg.Sender)
-			log.Printf("Removed user %s from active users due to 'left the chat' message", msg.Sender)
-			activeUsersMutex.Unlock()
-		} else {
-			// Regular message, update active users
-			updateActiveUsersFromMessages(msg)
-		}
-
 		// Broadcast to active message channels
 		broadcastCount := 0
 		for _, ch := range messageChannels {
@@ -367,13 +348,13 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	// Get correct username for this specific client
 	sender, ok := usernames[clientIP]
 	if !ok {
-		// Get from cookie as fallback
-		cookie, err := r.Cookie("username")
+		// Get from cookie as fallback - use port-specific cookie
+		cookie, err := r.Cookie(fmt.Sprintf("username_port%d", clientPort))
 		if err == nil && cookie != nil {
 			sender = cookie.Value
 			// Update the mapping for next time
 			usernames[clientIP] = sender
-			log.Printf("Retrieved username %s from cookie for client %s", sender, clientIP)
+			log.Printf("Retrieved username %s from port-specific cookie for client %s", sender, clientIP)
 		} else {
 			// Return an error if we can't identify the user
 			log.Printf("Could not identify user for client %s", clientIP)
@@ -424,11 +405,6 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Message sent successfully from %s with timestamp %s", sender, timestamp)
-
-	// Mark this user as active when they send a message
-	activeUsersMutex.Lock()
-	activeUserTimestamps[sender] = time.Now()
-	activeUsersMutex.Unlock()
 
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
@@ -581,11 +557,6 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Error sending leave message: %v", err)
 		}
 
-		// Remove from active users tracking
-		activeUsersMutex.Lock()
-		delete(activeUserTimestamps, loggedInUsername)
-		activeUsersMutex.Unlock()
-
 		// Make sure we process the leave message before closing connection
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -597,14 +568,23 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	delete(usernames, clientIP)
 	delete(userStreams, clientIP)
 
-	// Clear the cookie
+	// Clear the cookie - make it port-specific
 	cookie := &http.Cookie{
-		Name:   "username",
+		Name:   fmt.Sprintf("username_port%d", clientPort),
 		Value:  "",
 		Path:   "/",
 		MaxAge: -1,
 	}
 	http.SetCookie(w, cookie)
+
+	// Also clear the client_id cookie
+	clientIdCookie := &http.Cookie{
+		Name:   fmt.Sprintf("client_id_port%d", clientPort),
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	}
+	http.SetCookie(w, clientIdCookie)
 
 	log.Printf("Logout for client %s (%s), was logged in: %v", loggedInUsername, clientIP, wasLoggedIn)
 
@@ -628,45 +608,7 @@ func checkSessionHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"loggedIn":%t}`, isLoggedIn)
 }
 
-// Add an endpoint to get active users - completely revise this function
-func activeUsersHandler(w http.ResponseWriter, r *http.Request) {
-	// Use mutex for thread safety
-	activeUsersMutex.RLock()
-	defer activeUsersMutex.RUnlock()
-
-	// Create an array to hold active users
-	var activeUsers []string
-
-	// Get current time for timestamp comparison
-	now := time.Now()
-
-	// Add all users that were active in the last 2 minutes
-	// This is more reliable than using the loggedInUsers map
-	for username, lastSeen := range activeUserTimestamps {
-		if now.Sub(lastSeen) < 2*time.Minute {
-			activeUsers = append(activeUsers, username)
-		}
-	}
-
-	// Generate JSON response with all active users
-	w.Header().Set("Content-Type", "application/json")
-	if len(activeUsers) > 0 {
-		fmt.Fprintf(w, `{"users":["%s"]}`, strings.Join(activeUsers, `","`))
-	} else {
-		fmt.Fprintf(w, `{"users":[]}`)
-	}
-}
-
 // Add a periodic task to update all users seen in messages
-func updateActiveUsersFromMessages(msg *pb.ChatMessage) {
-	if msg != nil && msg.Sender != "" && msg.Sender != "System" {
-		activeUsersMutex.Lock()
-		activeUserTimestamps[msg.Sender] = time.Now()
-		activeUsersMutex.Unlock()
-	}
-}
-
-// Decrement the client counter when this client exits
 func decrementClientCount() {
 	counterFile := filepath.Join(baseDir, "client_count.txt")
 
@@ -737,6 +679,86 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"message":"pong","serverTime":%d}`, serverTime)
 }
 
+// Add a function to start streaming active users
+func startActiveUsersStream(username string) {
+	// Close any existing stream first
+	if activeUsersStream != nil {
+		activeUsersStream.CloseSend()
+	}
+
+	var err error
+	log.Printf("Starting active users stream for %s", username)
+
+	// Create a stream for active users
+	activeUsersStream, err = client.ActiveUsersStream(context.Background(), &pb.ActiveUsersRequest{
+		Username: username,
+	})
+
+	if err != nil {
+		log.Printf("Failed to create active users stream: %v", err)
+		return
+	}
+
+	// Start a goroutine to receive active user updates
+	go receiveActiveUserUpdates()
+}
+
+// Add a function to receive active user updates
+func receiveActiveUserUpdates() {
+	for {
+		// Check if stream exists
+		if activeUsersStream == nil {
+			log.Printf("Active users stream is nil, exiting receiver")
+			return
+		}
+
+		// Receive updates
+		update, err := activeUsersStream.Recv()
+		if err != nil {
+			log.Printf("Error receiving active users update: %v", err)
+			if err == io.EOF {
+				// Stream closed normally
+				return
+			}
+			// Try to reconnect after a delay
+			time.Sleep(5 * time.Second)
+			return
+		}
+
+		// Process the update based on the type
+		switch update.UpdateType {
+		case pb.ActiveUsersUpdate_FULL_LIST:
+			// Full list of active users
+			log.Printf("Received full active users list: %v", update.Users)
+
+			// Send as system message with a specific prefix for JavaScript to identify
+			usersStr := strings.Join(update.Users, ", ")
+			for _, ch := range messageChannels {
+				usersListMsg := &pb.ChatMessage{
+					Sender:    "System",
+					Message:   fmt.Sprintf("Active Users: %s", usersStr),
+					Timestamp: time.Now().Format("15:04:05"),
+				}
+
+				select {
+				case ch <- usersListMsg:
+					// Message sent successfully
+				default:
+					log.Printf("Channel buffer full, skipping active users update")
+				}
+			}
+
+		case pb.ActiveUsersUpdate_JOIN:
+			// User joined - this will be handled via chat messages and our JavaScript
+			log.Printf("User joined: %s", update.Username)
+
+		case pb.ActiveUsersUpdate_LEAVE:
+			// User left - this will be handled via chat messages and our JavaScript
+			log.Printf("User left: %s", update.Username)
+		}
+	}
+}
+
 func main() {
 	// Set the base directory for all file operations
 	baseDir = getClientDir()
@@ -774,12 +796,10 @@ func main() {
 	http.HandleFunc("/send", sendMessageHandler)
 	http.HandleFunc("/stream", streamMessagesHandler)
 	http.HandleFunc("/check-session", checkSessionHandler)
-	http.HandleFunc("/active-users", activeUsersHandler) // Add endpoint for active users
-	http.HandleFunc("/cleanup", cleanupHandler)          // Add cleanup handler
-	http.HandleFunc("/ping", pingHandler)                // Add the ping handler
+	http.HandleFunc("/cleanup", cleanupHandler) // Add cleanup handler
+	http.HandleFunc("/ping", pingHandler)       // Add the ping handler
 
-	// Start the active users cleaner goroutine
-	startActiveUsersCleaner()
+	// Make sure there's no active-users HTTP endpoint here
 
 	log.Printf("Client berjalan di http://localhost:%d", clientPort)
 	http.ListenAndServe(fmt.Sprintf(":%d", clientPort), nil)
@@ -822,25 +842,4 @@ func cleanupHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Cleanup handler called - decrementing client count")
 	decrementClientCount()
 	w.WriteHeader(http.StatusOK)
-}
-
-// Add this function at the end of main()
-func startActiveUsersCleaner() {
-	// Every 30 seconds, clean up old users
-	ticker := time.NewTicker(30 * time.Second)
-	go func() {
-		for range ticker.C {
-			now := time.Now()
-			activeUsersMutex.Lock()
-
-			// Remove users who haven't been seen in 2 minutes
-			for username, lastSeen := range activeUserTimestamps {
-				if now.Sub(lastSeen) > 2*time.Minute {
-					delete(activeUserTimestamps, username)
-					log.Printf("Removed inactive user: %s", username)
-				}
-			}
-			activeUsersMutex.Unlock()
-		}
-	}()
 }
