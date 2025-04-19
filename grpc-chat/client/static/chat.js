@@ -2,6 +2,11 @@ let username = "";
 let eventSource;
 let lastMessage = "";
 
+// Add these variables for status tracking below existing variables at the top
+let typingTimer;
+const TYPING_DELAY = 1000; // 1 second delay before reverting to "online"
+let lastStatusSent = "online"; // Track last status to avoid sending duplicates
+
 // Boot sequence text
 const bootText = `
 Initializing system...
@@ -251,28 +256,60 @@ function extractMessageContent(message) {
 function processActiveUsersList(usersList) {
     console.log("Processing active users list:", usersList);
     
-    // Clear the current active users set
-    activeUsers.clear();
-    
-    // If we have users, split and add them
-    if (usersList && usersList !== "") {
-        const users = usersList.split(",").map(user => user.trim());
-        users.forEach(user => {
-            if (user !== "System") {
-                addActiveUser(user);
+    try {
+        // Try to parse as JSON first (for the new format with statuses)
+        const usersData = JSON.parse(usersList);
+        
+        // Clear the current active users set and convert to Map if needed
+        if (!(activeUsers instanceof Map)) {
+            activeUsers = new Map();
+        } else {
+            activeUsers.clear();
+        }
+        
+        // Check if we got an array of users or a map of user statuses
+        if (Array.isArray(usersData)) {
+            // Process array format
+            usersData.forEach(user => {
+                if (user.username !== "System") {
+                    activeUsers.set(user.username, user.status || "online");
+                }
+            });
+        } else {
+            // Process object format (userStatuses map)
+            for (const [username, status] of Object.entries(usersData)) {
+                if (username !== "System") {
+                    activeUsers.set(username, status);
+                }
             }
-        });
+        }
+    } catch (e) {
+        console.error("Error parsing user list:", e);
+        console.log("Raw user list:", usersList);
+        
+        // Fallback to old format (comma-separated list)
+        if (usersList && usersList !== "") {
+            const users = usersList.split(",").map(user => user.trim());
+            users.forEach(user => {
+                if (user !== "System") {
+                    activeUsers.set(user, "online"); // Default to online status
+                }
+            });
+        }
     }
     
     // Ensure current user is in the list
     const currentUser = getCookie('username');
     if (currentUser && currentUser !== "System") {
-        addActiveUser(currentUser);
+        // Don't override current user's status if they're typing
+        if (!activeUsers.has(currentUser) || activeUsers.get(currentUser) !== "typing") {
+            activeUsers.set(currentUser, lastStatusSent || "online");
+        }
     }
     
-    // Update the UI
+    // Update the UI to reflect new statuses
     updateActiveUsersList();
-    console.log("Active users list updated with:", Array.from(activeUsers));
+    console.log("Active users list updated", Array.from(activeUsers.entries()));
 }
 
 // Handle user status changes (join/leave) - simplified version
@@ -400,6 +437,9 @@ window.addEventListener('beforeunload', function() {
             console.error("Failed to send cleanup request:", e);
         }
     }
+
+    // Set status to online before leaving
+    sendStatusUpdate('online');
 });
 
 // Enhanced logout function that properly closes the EventSource
@@ -625,24 +665,41 @@ function alternateProfileImage() {
 }
 
 // Function to add username to active users
-function addActiveUser(username) {
+function addActiveUser(username, status = "online") {
     // Never add System to the active users list
     if (username === "System") {
         return;
     }
     
-    if (!activeUsers.has(username)) {
-        activeUsers.add(username);
-        updateActiveUsersList();
+    // Convert activeUsers to Map to store status
+    if (!(activeUsers instanceof Map)) {
+        // Convert Set to Map if needed
+        const tempSet = activeUsers;
+        activeUsers = new Map();
+        tempSet.forEach(user => {
+            activeUsers.set(user, "online");
+        });
     }
+    
+    // Add or update user with status
+    activeUsers.set(username, status);
+    updateActiveUsersList();
 }
 
 // Function to remove a user from the active users list
 function removeActiveUser(username) {
-    if (activeUsers.has(username)) {
-        console.log(`Removing user ${username} from active users list`);
-        activeUsers.delete(username);
-        updateActiveUsersList();
+    if (activeUsers instanceof Map) {
+        if (activeUsers.has(username)) {
+            console.log(`Removing user ${username} from active users list`);
+            activeUsers.delete(username);
+            updateActiveUsersList();
+        }
+    } else if (activeUsers instanceof Set) {
+        if (activeUsers.has(username)) {
+            console.log(`Removing user ${username} from active users list`);
+            activeUsers.delete(username);
+            updateActiveUsersList();
+        }
     }
 }
 
@@ -654,28 +711,65 @@ function updateActiveUsersList() {
     // Keep the heading
     activeUsersElement.innerHTML = '<h3>Active Users</h3>';
     
-    // Sort users alphabetically for consistent display
-    const sortedUsers = Array.from(activeUsers).sort();
-    
     // Get current username once - prevent duplicate lookups
     const currentUser = getCookie('username');
     
-    // Add each user as a list item
-    sortedUsers.forEach(user => {
-        const userElement = document.createElement('div');
-        userElement.className = 'user-item';
+    if (activeUsers instanceof Map) {
+        // Sort users alphabetically for consistent display
+        const sortedUsers = Array.from(activeUsers.entries()).sort((a, b) => a[0].localeCompare(b[0]));
         
-        // Highlight current user
-        if (user === currentUser) {
-            userElement.style.fontWeight = 'bold';
-            userElement.style.color = '#00ffff'; // Cyan color for current user
-            userElement.textContent = user + ' (you)';
-        } else {
-            userElement.textContent = user;
-        }
+        console.log("Rendering active users with statuses:", sortedUsers);
         
-        activeUsersElement.appendChild(userElement);
-    });
+        // Add each user as a list item with status
+        sortedUsers.forEach(([user, status]) => {
+            const userElement = document.createElement('div');
+            userElement.className = 'user-item';
+            
+            // Highlight current user
+            if (user === currentUser) {
+                userElement.style.fontWeight = 'bold';
+                userElement.style.color = '#00ffff'; // Cyan color for current user
+                userElement.innerHTML = `${user} (you)`;
+            } else {
+                userElement.innerHTML = user;
+            }
+            
+            // Add status indicator
+            if (status === "typing") {
+                console.log(`Setting typing indicator for ${user}`);
+                const typingIndicator = document.createElement('span');
+                typingIndicator.className = 'typing-indicator';
+                typingIndicator.textContent = ' typing...';
+                userElement.appendChild(typingIndicator);
+            } else {
+                const onlineIndicator = document.createElement('span');
+                onlineIndicator.className = 'online-indicator';
+                onlineIndicator.textContent = ' online';
+                userElement.appendChild(onlineIndicator);
+            }
+            
+            activeUsersElement.appendChild(userElement);
+        });
+    } else {
+        // Backward compatibility with Set implementation
+        const sortedUsers = Array.from(activeUsers).sort();
+        
+        sortedUsers.forEach(user => {
+            const userElement = document.createElement('div');
+            userElement.className = 'user-item';
+            
+            // Highlight current user
+            if (user === currentUser) {
+                userElement.style.fontWeight = 'bold';
+                userElement.style.color = '#00ffff'; // Cyan color for current user
+                userElement.textContent = user + ' (you)';
+            } else {
+                userElement.textContent = user;
+            }
+            
+            activeUsersElement.appendChild(userElement);
+        });
+    }
 }
 
 // Event listener for message input
@@ -701,6 +795,26 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set up image alternating every 1 second
     setInterval(alternateProfileImage, 1000);
+
+    // Add typing detection to the message input
+    const messageInput = document.getElementById('message');
+    if (messageInput) {
+        // Add keydown event for typing detection in addition to existing keypress handler
+        messageInput.addEventListener('keydown', function(e) {
+            // Don't trigger on special keys like arrows, ctrl, etc.
+            if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') {
+                sendStatusUpdate('typing');
+                
+                // Clear existing timer
+                clearTimeout(typingTimer);
+                
+                // Set timer to revert to online after delay
+                typingTimer = setTimeout(() => {
+                    sendStatusUpdate('online');
+                }, TYPING_DELAY);
+            }
+        });
+    }
 });
 
 // Additional script for date/time updates
@@ -775,3 +889,62 @@ function pingServer() {
         addMessageToChat("<System> Failed to ping server. Check console for details.", true, false);
     });
 }
+
+// Function to send status update to server via client streaming RPC
+function sendStatusUpdate(status) {
+    // Avoid sending duplicate statuses
+    if (status === lastStatusSent) {
+        return;
+    }
+    
+    lastStatusSent = status;
+    console.log(`Sending status update: ${status}`);
+    
+    fetch(`/status?status=${status}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+            'Cache-Control': 'no-cache'
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            console.error("Failed to send status update:", response.status);
+            // Reset lastStatusSent if failed
+            lastStatusSent = null;
+            return;
+        }
+        console.log(`Status update "${status}" sent successfully`);
+    })
+    .catch(error => {
+        console.error("Error sending status update:", error);
+        // Reset lastStatusSent if failed
+        lastStatusSent = null;
+    });
+}
+
+// Add CSS for status indicators to the document head
+document.addEventListener('DOMContentLoaded', function() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .typing-indicator {
+            color: #0f0;
+            font-style: italic;
+            animation: blink 1s infinite;
+            margin-left: 5px;
+            font-size: 0.8em;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .online-indicator {
+            color: #0080ff;
+            margin-left: 5px;
+            font-size: 0.8em;
+        }
+    `;
+    document.head.appendChild(style);
+});

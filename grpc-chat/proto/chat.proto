@@ -1,43 +1,60 @@
 syntax = "proto3";
 
-package grpcchat;
+package chat;
 option go_package = ".";
 
 service ChatService {
-    rpc Login(LoginRequest) returns (LoginResponse);
-    rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
-    // Add a new streaming method for active users updates
-    rpc ActiveUsersStream(ActiveUsersRequest) returns (stream ActiveUsersUpdate);
+  // Existing RPCs
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc ChatStream(stream ChatMessage) returns (stream ChatMessage);
+  rpc ActiveUsersStream(ActiveUsersRequest) returns (stream ActiveUsersUpdate);
+  
+  // New client streaming RPC for status updates
+  rpc UpdateStatus(stream StatusUpdate) returns (StatusResponse);
 }
 
+// Existing message types
 message LoginRequest {
-    string username = 1;
+  string username = 1;
 }
 
 message LoginResponse {
-    string username = 1;
-    string message = 2;
+  string username = 1;
+  string message = 2;
 }
 
 message ChatMessage {
-    string sender = 1;
-    string message = 2;
-    string timestamp = 3;
+  string sender = 1;
+  string message = 2;
+  string timestamp = 3;
 }
 
-// New message types for active users streaming
 message ActiveUsersRequest {
-    string username = 1;  // The requesting user's name
+  string username = 1;
 }
 
 message ActiveUsersUpdate {
-    enum UpdateType {
-        FULL_LIST = 0;   // Full list of active users
-        JOIN = 1;        // User joined
-        LEAVE = 2;       // User left
-    }
-    
-    UpdateType update_type = 1;
-    repeated string users = 2;     // For FULL_LIST, the complete list of users
-    string username = 3;           // For JOIN/LEAVE, the affected user
+  enum UpdateType {
+    FULL_LIST = 0;
+    JOIN = 1;
+    LEAVE = 2;
+    STATUS_CHANGE = 3;
+  }
+  
+  UpdateType update_type = 1;
+  string username = 2;
+  repeated string users = 3;
+  map<string, string> user_statuses = 4; // Map username to status
+}
+
+// New message types for status updates
+message StatusUpdate {
+  string username = 1;
+  string status = 2;     // "typing" or "online"
+  string timestamp = 3;
+}
+
+message StatusResponse {
+  bool success = 1;
+  string message = 2;
 }

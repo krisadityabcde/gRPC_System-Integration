@@ -19,19 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ChatService_Login_FullMethodName             = "/grpcchat.ChatService/Login"
-	ChatService_ChatStream_FullMethodName        = "/grpcchat.ChatService/ChatStream"
-	ChatService_ActiveUsersStream_FullMethodName = "/grpcchat.ChatService/ActiveUsersStream"
+	ChatService_Login_FullMethodName             = "/chat.ChatService/Login"
+	ChatService_ChatStream_FullMethodName        = "/chat.ChatService/ChatStream"
+	ChatService_ActiveUsersStream_FullMethodName = "/chat.ChatService/ActiveUsersStream"
+	ChatService_UpdateStatus_FullMethodName      = "/chat.ChatService/UpdateStatus"
 )
 
 // ChatServiceClient is the client API for ChatService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatServiceClient interface {
+	// Existing RPCs
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 	ChatStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatMessage, ChatMessage], error)
-	// Add a new streaming method for active users updates
 	ActiveUsersStream(ctx context.Context, in *ActiveUsersRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ActiveUsersUpdate], error)
+	// New client streaming RPC for status updates
+	UpdateStatus(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StatusUpdate, StatusResponse], error)
 }
 
 type chatServiceClient struct {
@@ -84,14 +87,29 @@ func (c *chatServiceClient) ActiveUsersStream(ctx context.Context, in *ActiveUse
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatService_ActiveUsersStreamClient = grpc.ServerStreamingClient[ActiveUsersUpdate]
 
+func (c *chatServiceClient) UpdateStatus(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[StatusUpdate, StatusResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[2], ChatService_UpdateStatus_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StatusUpdate, StatusResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_UpdateStatusClient = grpc.ClientStreamingClient[StatusUpdate, StatusResponse]
+
 // ChatServiceServer is the server API for ChatService service.
 // All implementations must embed UnimplementedChatServiceServer
 // for forward compatibility.
 type ChatServiceServer interface {
+	// Existing RPCs
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	ChatStream(grpc.BidiStreamingServer[ChatMessage, ChatMessage]) error
-	// Add a new streaming method for active users updates
 	ActiveUsersStream(*ActiveUsersRequest, grpc.ServerStreamingServer[ActiveUsersUpdate]) error
+	// New client streaming RPC for status updates
+	UpdateStatus(grpc.ClientStreamingServer[StatusUpdate, StatusResponse]) error
 	mustEmbedUnimplementedChatServiceServer()
 }
 
@@ -110,6 +128,9 @@ func (UnimplementedChatServiceServer) ChatStream(grpc.BidiStreamingServer[ChatMe
 }
 func (UnimplementedChatServiceServer) ActiveUsersStream(*ActiveUsersRequest, grpc.ServerStreamingServer[ActiveUsersUpdate]) error {
 	return status.Errorf(codes.Unimplemented, "method ActiveUsersStream not implemented")
+}
+func (UnimplementedChatServiceServer) UpdateStatus(grpc.ClientStreamingServer[StatusUpdate, StatusResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method UpdateStatus not implemented")
 }
 func (UnimplementedChatServiceServer) mustEmbedUnimplementedChatServiceServer() {}
 func (UnimplementedChatServiceServer) testEmbeddedByValue()                     {}
@@ -168,11 +189,18 @@ func _ChatService_ActiveUsersStream_Handler(srv interface{}, stream grpc.ServerS
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ChatService_ActiveUsersStreamServer = grpc.ServerStreamingServer[ActiveUsersUpdate]
 
+func _ChatService_UpdateStatus_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ChatServiceServer).UpdateStatus(&grpc.GenericServerStream[StatusUpdate, StatusResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ChatService_UpdateStatusServer = grpc.ClientStreamingServer[StatusUpdate, StatusResponse]
+
 // ChatService_ServiceDesc is the grpc.ServiceDesc for ChatService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ChatService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "grpcchat.ChatService",
+	ServiceName: "chat.ChatService",
 	HandlerType: (*ChatServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -191,6 +219,11 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "ActiveUsersStream",
 			Handler:       _ChatService_ActiveUsersStream_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "UpdateStatus",
+			Handler:       _ChatService_UpdateStatus_Handler,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "proto/chat.proto",

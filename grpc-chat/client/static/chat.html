@@ -200,6 +200,22 @@
         .log-off-button:hover {
             background-color: #333;
         }
+
+        .typing-indicator {
+            color: #0f0;
+            font-style: italic;
+            animation: blink 1s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .online-indicator {
+            color: #0080ff;
+            font-size: 0.8em;
+        }
     </style>
     <!-- Prevent caching -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />

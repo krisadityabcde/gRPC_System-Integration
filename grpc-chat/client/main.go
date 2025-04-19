@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -41,6 +42,13 @@ var sessionsMutex sync.RWMutex               // Mutex for thread-safe access to 
 var (
 	processedMessages = make(map[string]bool) // Track message IDs to avoid duplicates
 	processMutex      sync.Mutex              // Mutex to protect processedMessages map
+)
+
+// Status update related variables
+var (
+	statusStreams     map[string]pb.ChatService_UpdateStatusClient
+	statusStreamMutex sync.Mutex
+	lastStatusUpdate  time.Time
 )
 
 // Generate a unique ID for messages
@@ -768,8 +776,146 @@ func receiveActiveUserUpdates() {
 			// User left
 			log.Printf("User left: %s", update.Username)
 			broadcastSystemMessage(fmt.Sprintf("UserLeft: %s", update.Username))
+
+		case pb.ActiveUsersUpdate_STATUS_CHANGE:
+			// User status changed
+			log.Printf("User status changed: %s now %s", update.Username, update.UserStatuses[update.Username])
+
+			// Konversi status ke format JSON agar dapat dipahami oleh JavaScript client
+			userStatusesJSON, err := json.Marshal(update.UserStatuses)
+			if err != nil {
+				log.Printf("Error marshaling user statuses: %v", err)
+				return
+			}
+
+			// Kirim pesan status update ke client
+			broadcastSystemMessage(fmt.Sprintf("ActiveUsersList: %s", string(userStatusesJSON)))
 		}
 	}
+}
+
+// New handler for status updates
+func statusUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	clientIP := getClientIdentifier(r)
+	username, ok := usernames[clientIP]
+	if !ok {
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	status := r.URL.Query().Get("status")
+	if status != "typing" && status != "online" {
+		http.Error(w, "Invalid status. Must be 'typing' or 'online'", http.StatusBadRequest)
+		return
+	}
+
+	// Get or create status stream
+	statusStream, err := getStatusStream(clientIP, username)
+	if err != nil {
+		log.Printf("Error getting status stream: %v", err)
+		http.Error(w, "Failed to update status", http.StatusInternalServerError)
+		return
+	}
+
+	// Send status update
+	timestamp := time.Now().Format("15:04:05")
+	err = statusStream.Send(&pb.StatusUpdate{
+		Username:  username,
+		Status:    status,
+		Timestamp: timestamp,
+	})
+
+	if err != nil {
+		log.Printf("Error sending status update: %v", err)
+
+		// Stream might be broken, try to create a new one
+		statusStreamMutex.Lock()
+		delete(statusStreams, clientIP)
+		statusStreamMutex.Unlock()
+
+		http.Error(w, "Failed to update status", http.StatusInternalServerError)
+		return
+	}
+
+	// Only keep the stream open briefly for typing statuses
+	// to avoid having too many open streams
+	if status == "typing" {
+		// For typing events, we'll let the stream close after the online status is sent
+		lastStatusUpdate = time.Now()
+
+		// In the background, send "online" after a delay if no more typing
+		go func() {
+			time.Sleep(3 * time.Second)
+
+			// If no status updates in the last 3 seconds, send "online"
+			if time.Since(lastStatusUpdate) >= 3*time.Second {
+				// Try to reuse the same stream
+				if stream, ok := statusStreams[clientIP]; ok {
+					err := stream.Send(&pb.StatusUpdate{
+						Username:  username,
+						Status:    "online",
+						Timestamp: time.Now().Format("15:04:05"),
+					})
+
+					if err != nil {
+						log.Printf("Error sending automatic online status: %v", err)
+					}
+				}
+			}
+		}()
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "success",
+	})
+}
+
+// Helper function to get or create status stream
+func getStatusStream(clientIP, username string) (pb.ChatService_UpdateStatusClient, error) {
+	statusStreamMutex.Lock()
+	defer statusStreamMutex.Unlock()
+
+	// Check if we already have a stream
+	if stream, ok := statusStreams[clientIP]; ok {
+		return stream, nil
+	}
+
+	// Create new stream
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := client.UpdateStatus(ctx)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	// Store the stream
+	statusStreams[clientIP] = stream
+
+	// Handle stream completion in background
+	go handleStatusStreamCompletion(clientIP, username, stream, cancel)
+
+	return stream, nil
+}
+
+// Handle completion of status stream
+func handleStatusStreamCompletion(clientIP, username string, stream pb.ChatService_UpdateStatusClient, cancel context.CancelFunc) {
+	// Wait for stream to complete
+	response, err := stream.CloseAndRecv()
+
+	// Clean up resources
+	cancel()
+	statusStreamMutex.Lock()
+	delete(statusStreams, clientIP)
+	statusStreamMutex.Unlock()
+
+	if err != nil && err != io.EOF {
+		log.Printf("Status stream error for %s: %v", username, err)
+		return
+	}
+
+	log.Printf("Status stream completed for %s: %v", username, response)
 }
 
 func main() {
@@ -783,6 +929,9 @@ func main() {
 	clientPort = getNextClientPort()
 	conn, _ := grpc.Dial("localhost:50051", grpc.WithInsecure())
 	client = pb.NewChatServiceClient(conn)
+
+	// Initialize status streams map
+	statusStreams = make(map[string]pb.ChatService_UpdateStatusClient)
 
 	// Serve static files with absolute path
 	staticDir := filepath.Join(baseDir, "static")
@@ -811,6 +960,7 @@ func main() {
 	http.HandleFunc("/check-session", checkSessionHandler)
 	http.HandleFunc("/cleanup", cleanupHandler) // Add cleanup handler
 	http.HandleFunc("/ping", pingHandler)       // Add the ping handler
+	http.HandleFunc("/status", statusUpdateHandler)
 
 	// Make sure there's no active-users HTTP endpoint here
 

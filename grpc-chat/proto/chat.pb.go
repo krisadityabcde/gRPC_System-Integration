@@ -24,9 +24,10 @@ const (
 type ActiveUsersUpdate_UpdateType int32
 
 const (
-	ActiveUsersUpdate_FULL_LIST ActiveUsersUpdate_UpdateType = 0 // Full list of active users
-	ActiveUsersUpdate_JOIN      ActiveUsersUpdate_UpdateType = 1 // User joined
-	ActiveUsersUpdate_LEAVE     ActiveUsersUpdate_UpdateType = 2 // User left
+	ActiveUsersUpdate_FULL_LIST     ActiveUsersUpdate_UpdateType = 0
+	ActiveUsersUpdate_JOIN          ActiveUsersUpdate_UpdateType = 1
+	ActiveUsersUpdate_LEAVE         ActiveUsersUpdate_UpdateType = 2
+	ActiveUsersUpdate_STATUS_CHANGE ActiveUsersUpdate_UpdateType = 3
 )
 
 // Enum value maps for ActiveUsersUpdate_UpdateType.
@@ -35,11 +36,13 @@ var (
 		0: "FULL_LIST",
 		1: "JOIN",
 		2: "LEAVE",
+		3: "STATUS_CHANGE",
 	}
 	ActiveUsersUpdate_UpdateType_value = map[string]int32{
-		"FULL_LIST": 0,
-		"JOIN":      1,
-		"LEAVE":     2,
+		"FULL_LIST":     0,
+		"JOIN":          1,
+		"LEAVE":         2,
+		"STATUS_CHANGE": 3,
 	}
 )
 
@@ -70,6 +73,7 @@ func (ActiveUsersUpdate_UpdateType) EnumDescriptor() ([]byte, []int) {
 	return file_proto_chat_proto_rawDescGZIP(), []int{4, 0}
 }
 
+// Existing message types
 type LoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
@@ -226,10 +230,9 @@ func (x *ChatMessage) GetTimestamp() string {
 	return ""
 }
 
-// New message types for active users streaming
 type ActiveUsersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"` // The requesting user's name
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,9 +276,10 @@ func (x *ActiveUsersRequest) GetUsername() string {
 
 type ActiveUsersUpdate struct {
 	state         protoimpl.MessageState       `protogen:"open.v1"`
-	UpdateType    ActiveUsersUpdate_UpdateType `protobuf:"varint,1,opt,name=update_type,json=updateType,proto3,enum=grpcchat.ActiveUsersUpdate_UpdateType" json:"update_type,omitempty"`
-	Users         []string                     `protobuf:"bytes,2,rep,name=users,proto3" json:"users,omitempty"`       // For FULL_LIST, the complete list of users
-	Username      string                       `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"` // For JOIN/LEAVE, the affected user
+	UpdateType    ActiveUsersUpdate_UpdateType `protobuf:"varint,1,opt,name=update_type,json=updateType,proto3,enum=chat.ActiveUsersUpdate_UpdateType" json:"update_type,omitempty"`
+	Username      string                       `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Users         []string                     `protobuf:"bytes,3,rep,name=users,proto3" json:"users,omitempty"`
+	UserStatuses  map[string]string            `protobuf:"bytes,4,rep,name=user_statuses,json=userStatuses,proto3" json:"user_statuses,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Map username to status
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -317,6 +321,13 @@ func (x *ActiveUsersUpdate) GetUpdateType() ActiveUsersUpdate_UpdateType {
 	return ActiveUsersUpdate_FULL_LIST
 }
 
+func (x *ActiveUsersUpdate) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
 func (x *ActiveUsersUpdate) GetUsers() []string {
 	if x != nil {
 		return x.Users
@@ -324,9 +335,122 @@ func (x *ActiveUsersUpdate) GetUsers() []string {
 	return nil
 }
 
-func (x *ActiveUsersUpdate) GetUsername() string {
+func (x *ActiveUsersUpdate) GetUserStatuses() map[string]string {
+	if x != nil {
+		return x.UserStatuses
+	}
+	return nil
+}
+
+// New message types for status updates
+type StatusUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // "typing" or "online"
+	Timestamp     string                 `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatusUpdate) Reset() {
+	*x = StatusUpdate{}
+	mi := &file_proto_chat_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatusUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatusUpdate) ProtoMessage() {}
+
+func (x *StatusUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chat_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatusUpdate.ProtoReflect.Descriptor instead.
+func (*StatusUpdate) Descriptor() ([]byte, []int) {
+	return file_proto_chat_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *StatusUpdate) GetUsername() string {
 	if x != nil {
 		return x.Username
+	}
+	return ""
+}
+
+func (x *StatusUpdate) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *StatusUpdate) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+type StatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatusResponse) Reset() {
+	*x = StatusResponse{}
+	mi := &file_proto_chat_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatusResponse) ProtoMessage() {}
+
+func (x *StatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_chat_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
+func (*StatusResponse) Descriptor() ([]byte, []int) {
+	return file_proto_chat_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *StatusResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *StatusResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -335,7 +459,7 @@ var File_proto_chat_proto protoreflect.FileDescriptor
 
 const file_proto_chat_proto_rawDesc = "" +
 	"\n" +
-	"\x10proto/chat.proto\x12\bgrpcchat\"*\n" +
+	"\x10proto/chat.proto\x12\x04chat\"*\n" +
 	"\fLoginRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\"E\n" +
 	"\rLoginResponse\x12\x1a\n" +
@@ -346,22 +470,35 @@ const file_proto_chat_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
 	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"0\n" +
 	"\x12ActiveUsersRequest\x12\x1a\n" +
-	"\busername\x18\x01 \x01(\tR\busername\"\xc0\x01\n" +
-	"\x11ActiveUsersUpdate\x12G\n" +
-	"\vupdate_type\x18\x01 \x01(\x0e2&.grpcchat.ActiveUsersUpdate.UpdateTypeR\n" +
-	"updateType\x12\x14\n" +
-	"\x05users\x18\x02 \x03(\tR\x05users\x12\x1a\n" +
-	"\busername\x18\x03 \x01(\tR\busername\"0\n" +
+	"\busername\x18\x01 \x01(\tR\busername\"\xe0\x02\n" +
+	"\x11ActiveUsersUpdate\x12C\n" +
+	"\vupdate_type\x18\x01 \x01(\x0e2\".chat.ActiveUsersUpdate.UpdateTypeR\n" +
+	"updateType\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x14\n" +
+	"\x05users\x18\x03 \x03(\tR\x05users\x12N\n" +
+	"\ruser_statuses\x18\x04 \x03(\v2).chat.ActiveUsersUpdate.UserStatusesEntryR\fuserStatuses\x1a?\n" +
+	"\x11UserStatusesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"C\n" +
 	"\n" +
 	"UpdateType\x12\r\n" +
 	"\tFULL_LIST\x10\x00\x12\b\n" +
 	"\x04JOIN\x10\x01\x12\t\n" +
-	"\x05LEAVE\x10\x022\xd9\x01\n" +
-	"\vChatService\x128\n" +
-	"\x05Login\x12\x16.grpcchat.LoginRequest\x1a\x17.grpcchat.LoginResponse\x12>\n" +
+	"\x05LEAVE\x10\x02\x12\x11\n" +
+	"\rSTATUS_CHANGE\x10\x03\"`\n" +
+	"\fStatusUpdate\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"D\n" +
+	"\x0eStatusResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xfd\x01\n" +
+	"\vChatService\x120\n" +
+	"\x05Login\x12\x12.chat.LoginRequest\x1a\x13.chat.LoginResponse\x126\n" +
 	"\n" +
-	"ChatStream\x12\x15.grpcchat.ChatMessage\x1a\x15.grpcchat.ChatMessage(\x010\x01\x12P\n" +
-	"\x11ActiveUsersStream\x12\x1c.grpcchat.ActiveUsersRequest\x1a\x1b.grpcchat.ActiveUsersUpdate0\x01B\x03Z\x01.b\x06proto3"
+	"ChatStream\x12\x11.chat.ChatMessage\x1a\x11.chat.ChatMessage(\x010\x01\x12H\n" +
+	"\x11ActiveUsersStream\x12\x18.chat.ActiveUsersRequest\x1a\x17.chat.ActiveUsersUpdate0\x01\x12:\n" +
+	"\fUpdateStatus\x12\x12.chat.StatusUpdate\x1a\x14.chat.StatusResponse(\x01B\x03Z\x01.b\x06proto3"
 
 var (
 	file_proto_chat_proto_rawDescOnce sync.Once
@@ -376,28 +513,34 @@ func file_proto_chat_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proto_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_proto_chat_proto_goTypes = []any{
-	(ActiveUsersUpdate_UpdateType)(0), // 0: grpcchat.ActiveUsersUpdate.UpdateType
-	(*LoginRequest)(nil),              // 1: grpcchat.LoginRequest
-	(*LoginResponse)(nil),             // 2: grpcchat.LoginResponse
-	(*ChatMessage)(nil),               // 3: grpcchat.ChatMessage
-	(*ActiveUsersRequest)(nil),        // 4: grpcchat.ActiveUsersRequest
-	(*ActiveUsersUpdate)(nil),         // 5: grpcchat.ActiveUsersUpdate
+	(ActiveUsersUpdate_UpdateType)(0), // 0: chat.ActiveUsersUpdate.UpdateType
+	(*LoginRequest)(nil),              // 1: chat.LoginRequest
+	(*LoginResponse)(nil),             // 2: chat.LoginResponse
+	(*ChatMessage)(nil),               // 3: chat.ChatMessage
+	(*ActiveUsersRequest)(nil),        // 4: chat.ActiveUsersRequest
+	(*ActiveUsersUpdate)(nil),         // 5: chat.ActiveUsersUpdate
+	(*StatusUpdate)(nil),              // 6: chat.StatusUpdate
+	(*StatusResponse)(nil),            // 7: chat.StatusResponse
+	nil,                               // 8: chat.ActiveUsersUpdate.UserStatusesEntry
 }
 var file_proto_chat_proto_depIdxs = []int32{
-	0, // 0: grpcchat.ActiveUsersUpdate.update_type:type_name -> grpcchat.ActiveUsersUpdate.UpdateType
-	1, // 1: grpcchat.ChatService.Login:input_type -> grpcchat.LoginRequest
-	3, // 2: grpcchat.ChatService.ChatStream:input_type -> grpcchat.ChatMessage
-	4, // 3: grpcchat.ChatService.ActiveUsersStream:input_type -> grpcchat.ActiveUsersRequest
-	2, // 4: grpcchat.ChatService.Login:output_type -> grpcchat.LoginResponse
-	3, // 5: grpcchat.ChatService.ChatStream:output_type -> grpcchat.ChatMessage
-	5, // 6: grpcchat.ChatService.ActiveUsersStream:output_type -> grpcchat.ActiveUsersUpdate
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 0: chat.ActiveUsersUpdate.update_type:type_name -> chat.ActiveUsersUpdate.UpdateType
+	8, // 1: chat.ActiveUsersUpdate.user_statuses:type_name -> chat.ActiveUsersUpdate.UserStatusesEntry
+	1, // 2: chat.ChatService.Login:input_type -> chat.LoginRequest
+	3, // 3: chat.ChatService.ChatStream:input_type -> chat.ChatMessage
+	4, // 4: chat.ChatService.ActiveUsersStream:input_type -> chat.ActiveUsersRequest
+	6, // 5: chat.ChatService.UpdateStatus:input_type -> chat.StatusUpdate
+	2, // 6: chat.ChatService.Login:output_type -> chat.LoginResponse
+	3, // 7: chat.ChatService.ChatStream:output_type -> chat.ChatMessage
+	5, // 8: chat.ChatService.ActiveUsersStream:output_type -> chat.ActiveUsersUpdate
+	7, // 9: chat.ChatService.UpdateStatus:output_type -> chat.StatusResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_proto_chat_proto_init() }
@@ -411,7 +554,7 @@ func file_proto_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_chat_proto_rawDesc), len(file_proto_chat_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

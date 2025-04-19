@@ -25,6 +25,9 @@ type server struct {
 	activeUsers       map[string]bool                                   // Track active users by username
 	activeUsersMutex  sync.RWMutex                                      // Mutex for thread-safe access
 	userUpdateStreams map[string]pb.ChatService_ActiveUsersStreamServer // Maps client ID to active users stream
+	// User status tracking
+	userStatus      map[string]string // Maps username to status
+	userStatusMutex sync.RWMutex
 }
 
 // Login hanya menyimpan username
@@ -66,12 +69,25 @@ func (s *server) broadcastAllActiveUsers() {
 	}
 	s.activeUsersMutex.RUnlock()
 
+	// Get current statuses
+	s.userStatusMutex.RLock()
+	userStatuses := make(map[string]string)
+	for _, user := range activeUsersList {
+		if status, ok := s.userStatus[user]; ok {
+			userStatuses[user] = status
+		} else {
+			userStatuses[user] = "online" // Default status
+		}
+	}
+	s.userStatusMutex.RUnlock()
+
 	log.Printf("Broadcasting full active users list to all clients: %v", activeUsersList)
 
-	// Create the update message
+	// Create the update message with statuses
 	update := &pb.ActiveUsersUpdate{
-		UpdateType: pb.ActiveUsersUpdate_FULL_LIST,
-		Users:      activeUsersList,
+		UpdateType:   pb.ActiveUsersUpdate_FULL_LIST,
+		Users:        activeUsersList,
+		UserStatuses: userStatuses,
 	}
 
 	// Send to all active streams
@@ -298,6 +314,96 @@ func (s *server) broadcastMessage(msg *pb.ChatMessage) {
 	}
 }
 
+// Implement UpdateStatus method for client streaming
+func (s *server) UpdateStatus(stream pb.ChatService_UpdateStatusServer) error {
+	var lastUsername string
+	var lastStatus string
+	var updated bool
+
+	for {
+		statusUpdate, err := stream.Recv()
+		if err == io.EOF {
+			// End of client stream, send response
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		username := statusUpdate.Username
+		status := statusUpdate.Status
+		timestamp := statusUpdate.Timestamp
+
+		// Store most recent values to use in response
+		lastUsername = username
+		lastStatus = status
+		updated = true
+
+		log.Printf("Status update from %s: %s at %s", username, status, timestamp)
+
+		// Update the user's status
+		s.userStatusMutex.Lock()
+		previousStatus, exists := s.userStatus[username]
+		s.userStatus[username] = status
+		s.userStatusMutex.Unlock()
+
+		// Only broadcast if status changed
+		if !exists || previousStatus != status {
+			go s.broadcastStatusUpdate(username, status)
+		}
+	}
+
+	// Send response back to client
+	if updated {
+		return stream.SendAndClose(&pb.StatusResponse{
+			Success: true,
+			Message: fmt.Sprintf("Status for %s updated to %s", lastUsername, lastStatus),
+		})
+	}
+
+	return stream.SendAndClose(&pb.StatusResponse{
+		Success: false,
+		Message: "No status updates received",
+	})
+}
+
+// Add new function to broadcast status updates
+func (s *server) broadcastStatusUpdate(username string, status string) {
+	// Get current active users and their statuses
+	s.activeUsersMutex.RLock()
+	s.userStatusMutex.RLock()
+
+	userStatuses := make(map[string]string)
+	for user := range s.activeUsers {
+		if userStatus, ok := s.userStatus[user]; ok {
+			userStatuses[user] = userStatus
+		} else {
+			userStatuses[user] = "online" // Default status
+		}
+	}
+
+	s.userStatusMutex.RUnlock()
+	s.activeUsersMutex.RUnlock()
+
+	// Create status update message
+	update := &pb.ActiveUsersUpdate{
+		UpdateType:   pb.ActiveUsersUpdate_STATUS_CHANGE,
+		Username:     username,
+		UserStatuses: userStatuses,
+	}
+
+	// Send to all streams
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, userStream := range s.userUpdateStreams {
+		if err := userStream.Send(update); err != nil {
+			log.Printf("Error sending status update to stream %s: %v", id, err)
+		}
+	}
+}
+
+// Update main() function to initialize userStatus map
 func main() {
 	// Create and configure server
 	s := &server{
@@ -306,6 +412,7 @@ func main() {
 		messageCache:      make([]*pb.ChatMessage, 0, 100),
 		activeUsers:       make(map[string]bool),
 		userUpdateStreams: make(map[string]pb.ChatService_ActiveUsersStreamServer),
+		userStatus:        make(map[string]string),
 	}
 
 	// Set up gRPC server
