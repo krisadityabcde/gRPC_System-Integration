@@ -132,6 +132,10 @@ function startChat() {
         document.cookie = `client_id=${clientId}; path=/; max-age=${60*60*24}`;
     }
     
+    // Use a session-unique ID to track messages from this client
+    myMessagesPrefix = `client_${Math.random().toString(36).substring(2, 10)}`;
+    console.log("Generated unique message tracking prefix:", myMessagesPrefix);
+    
     eventSource = new EventSource(`/stream?t=${timestamp}&clientId=${clientId}`);
     
     // Debug any messages coming through
@@ -146,14 +150,29 @@ function startChat() {
         
         console.log("Message received:", msg);
         
-        // Check if this is our own message to avoid sender confusion
+        // Extract username from message format: <username> message
         const messageUsername = extractUsernameFromMessage(msg);
         
-        // Add to chat display
-        addMessageToChat(msg, false, messageUsername === username);
+        // Get our username directly from cookie every time to ensure consistency
+        const currentUsername = getCookie('username');
         
-        // Extract username from message format: <username> message
-        if (messageUsername) {
+        // A message is our own if it matches one of our locally echoed messages
+        // Or if the sender username matches our username from cookie
+        let isOwnMessage = localEchoMessages.has(msg);
+        
+        // Add another check comparing usernames
+        if (!isOwnMessage && messageUsername === currentUsername) {
+            isOwnMessage = true;
+            console.log("Message identified as own based on username match");
+        }
+        
+        console.log(`Message from ${messageUsername}, currentUsername: ${currentUsername}, isOwn: ${isOwnMessage}`);
+        
+        // Add to chat display with proper ownership flag
+        addMessageToChat(msg, false, isOwnMessage);
+        
+        // Add the sender to active users - explicitly exclude System
+        if (messageUsername && messageUsername !== "System") {
             addActiveUser(messageUsername);
         }
     });
@@ -208,7 +227,7 @@ function extractUsernameFromMessage(message) {
     return null;
 }
 
-// Improved function to help debug message flow
+// Improved function to add messages to chat
 function addMessageToChat(message, isLocalEcho = false, isOwnMessage = false) {
     console.log(`Adding message to chat box: ${message} (local echo: ${isLocalEcho}, own message: ${isOwnMessage})`);
     
@@ -264,7 +283,8 @@ function addMessageToChat(message, isLocalEcho = false, isOwnMessage = false) {
                 messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> <span style="color: #f55;">${messageContent}</span>`; 
             }
             else {
-                // Regular message
+                // Regular message - IMPORTANT: Always use the username from the message
+                // Don't replace it with the local username even for local echoes
                 messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> ${messageContent}`;
                 
                 // Any user who sends a message is active - add them to active users
@@ -379,15 +399,17 @@ function fetchActiveUsers() {
             // Update the active users set
             activeUsers.clear();
             
-            // Add all users from the server's response
+            // Add all users from the server's response, excluding System
             if (data.users && Array.isArray(data.users)) {
                 data.users.forEach(user => {
-                    activeUsers.add(user);
+                    if (user !== "System") {
+                        activeUsers.add(user);
+                    }
                 });
             }
             
-            // Always make sure current user is in the list
-            if (username) {
+            // Always make sure current user is in the list, unless it's System
+            if (username && username !== "System") {
                 activeUsers.add(username);
             }
             
@@ -402,23 +424,34 @@ function sendMessage() {
     let messageText = input.value.trim();
 
     if (messageText !== "") {
-        console.log("Sending message:", messageText);
-        
-        // Store the message text for local echo
-        const messageToSend = messageText;
+        console.log("Processing message:", messageText);
         
         // Clear input immediately to prevent double-sending
         input.value = "";
+        
+        // Check if this is a multiple message command
+        if (messageText.startsWith("/multiple")) {
+            handleMultipleMessages(messageText);
+            return;
+        }
+        
+        // Always get username directly from cookie
+        const currentUsername = getCookie('username');
+        console.log(`Sending message as ${currentUsername}:`, messageText);
+        
+        // Store the message text for local echo
+        const messageToSend = messageText;
         
         // Add timestamp to prevent caching
         const timestamp = new Date().getTime();
         
         // Add a local echo of the message to show it immediately
-        const localMessage = `<${username}> ${messageToSend}`;
-        addMessageToChat(localMessage, true); // true indicates this is a local echo
+        // Make sure to use the current username for the local echo
+        const localMessage = `<${currentUsername}> ${messageToSend}`;
+        addMessageToChat(localMessage, true, true); // true indicates this is a local echo and own message
         
-        // Send to server
-        fetch("/send?message=" + encodeURIComponent(messageToSend) + "&t=" + timestamp, {
+        // Send to server with client id for additional attribution
+        fetch(`/send?message=${encodeURIComponent(messageToSend)}&t=${timestamp}`, {
             method: 'GET',
             credentials: 'same-origin',
             headers: {
@@ -441,6 +474,76 @@ function sendMessage() {
             console.error("Error sending message:", error);
         });
     }
+}
+
+// Function to handle multiple messages command
+function handleMultipleMessages(messageText) {
+    // Extract all messages enclosed in parentheses
+    const messageRegex = /\(([^)]+)\)/g;
+    const matches = [...messageText.matchAll(messageRegex)];
+    
+    if (!matches || matches.length === 0) {
+        addMessageToChat("<System> Invalid multiple message format. Use: /multiple (message 1), (message 2), ...", true, false);
+        return;
+    }
+    
+    // Extract the messages from the regex matches
+    const messages = matches.map(match => match[1].trim());
+    console.log("Multiple messages to send:", messages);
+    
+    // Add a status message
+    addMessageToChat(`<System> Sending ${messages.length} messages...`, true, false);
+    
+    // Always get username directly from cookie
+    const currentUsername = getCookie('username');
+    
+    // Send messages with a small delay between them to simulate typing
+    let delay = 0;
+    messages.forEach((msg, index) => {
+        // Calculate delay based on message length (simulating typing speed)
+        const typingDelay = 500 + (msg.length * 30); // Base delay + ~30ms per character
+        
+        setTimeout(() => {
+            // Add timestamp to prevent caching
+            const timestamp = new Date().getTime();
+            
+            // Add a local echo of the message using current username
+            const localMessage = `<${currentUsername}> ${msg}`;
+            addMessageToChat(localMessage, true, true);
+            
+            // Send to server
+            fetch("/send?message=" + encodeURIComponent(msg) + "&t=" + timestamp, {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    console.log(`Message ${index+1}/${messages.length} sent successfully`);
+                    return response.json();
+                } else {
+                    removeLocalEcho(localMessage);
+                    console.error(`Failed to send message ${index+1}/${messages.length}:`, response.status);
+                    throw new Error("Send failed");
+                }
+            })
+            .catch(error => {
+                console.error(`Error sending message ${index+1}/${messages.length}:`, error);
+            });
+            
+            // If this is the last message, add completion message
+            if (index === messages.length - 1) {
+                setTimeout(() => {
+                    addMessageToChat("<System> All messages sent successfully.", true, false);
+                }, 500);
+            }
+        }, delay);
+        
+        // Increase delay for next message
+        delay += typingDelay;
+    });
 }
 
 // A set to keep track of local echo messages
@@ -494,6 +597,11 @@ username = getCookie('username');
 
 // Function to add username to active users
 function addActiveUser(username) {
+    // Never add System to the active users list
+    if (username === "System") {
+        return;
+    }
+    
     if (!activeUsers.has(username)) {
         activeUsers.add(username);
         updateActiveUsersList();
@@ -532,11 +640,15 @@ document.getElementById('message').addEventListener('keypress', function(e) {
 });
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize username from cookie right away
+    username = getCookie('username') || "";
+    console.log("DOMContentLoaded: Using username from cookie:", username);
+    
     // Initialize chat immediately
     startChat();
     
     // Add current user to active users list
-    if (username) {
+    if (username && username !== "System") {
         addActiveUser(username);
     }
     
@@ -582,4 +694,45 @@ function extractUsernameFromMessage(message) {
         return match[1].trim();
     }
     return null;
+}
+
+// Function to test server latency
+function pingServer() {
+    // Record start time
+    const startTime = Date.now();
+    
+    // Display sending message
+    addMessageToChat("<System> Sending ping to server...", true, false);
+    
+    // Send ping request to server
+    fetch(`/ping?t=${startTime}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+            'Cache-Control': 'no-cache'
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error("Server ping failed");
+        }
+        return response.json();
+    })
+    .then(data => {
+        // Calculate round-trip time
+        const endTime = Date.now();
+        const latency = endTime - startTime;
+        
+        // Display result in chat
+        addMessageToChat(`<System> Pong! Server latency: ${latency}ms`, true, false);
+        
+        // Log additional server info if available
+        if (data.serverTime) {
+            console.log(`Server processing time: ${data.serverTime}ms`);
+        }
+    })
+    .catch(error => {
+        console.error("Ping error:", error);
+        addMessageToChat("<System> Failed to ping server. Check console for details.", true, false);
+    });
 }

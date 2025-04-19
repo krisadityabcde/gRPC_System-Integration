@@ -356,12 +356,6 @@ func receiveMessagesForUser(clientIP string, stream pb.ChatService_ChatStreamCli
 	}
 }
 
-// Replace existing receiveMessages function
-func receiveMessages() {
-	// This function is deprecated, log a warning if it's called
-	log.Println("WARNING: Legacy receiveMessages() function called, should use receiveMessagesForUser instead")
-}
-
 // Handler untuk mengirim pesan
 func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	msg := r.URL.Query().Get("message")
@@ -722,6 +716,27 @@ func decrementClientCount() {
 	log.Printf("Client count decremented to %d", count)
 }
 
+// Handler for ping requests to test latency
+func pingHandler(w http.ResponseWriter, r *http.Request) {
+	// Record start time for server processing
+	startTime := time.Now()
+
+	// Get client identifier for debugging
+	clientIP := getClientIdentifier(r)
+	log.Printf("Ping request from client %s", clientIP)
+
+	// Add a small delay to simulate processing (optional)
+	// time.Sleep(10 * time.Millisecond)
+
+	// Calculate processing time
+	serverTime := time.Since(startTime).Milliseconds()
+
+	// Return pong response with timing info
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	fmt.Fprintf(w, `{"message":"pong","serverTime":%d}`, serverTime)
+}
+
 func main() {
 	// Set the base directory for all file operations
 	baseDir = getClientDir()
@@ -761,6 +776,7 @@ func main() {
 	http.HandleFunc("/check-session", checkSessionHandler)
 	http.HandleFunc("/active-users", activeUsersHandler) // Add endpoint for active users
 	http.HandleFunc("/cleanup", cleanupHandler)          // Add cleanup handler
+	http.HandleFunc("/ping", pingHandler)                // Add the ping handler
 
 	// Start the active users cleaner goroutine
 	startActiveUsersCleaner()
