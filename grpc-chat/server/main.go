@@ -38,7 +38,14 @@ func (s *server) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResp
 	s.activeUsers[req.Username] = true
 	s.activeUsersMutex.Unlock()
 
-	// Only broadcast join event if this is a new user
+	// Always broadcast the full user list after a new login
+	go func() {
+		// Small delay to ensure all initial setup is complete
+		time.Sleep(200 * time.Millisecond)
+		s.broadcastAllActiveUsers()
+	}()
+
+	// Additionally broadcast the join event if this is a new user
 	if isNewUser {
 		go s.broadcastUserJoin(req.Username)
 	}
@@ -47,6 +54,37 @@ func (s *server) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResp
 		Username: req.Username,
 		Message:  "Login sukses",
 	}, nil
+}
+
+// New helper function to broadcast the complete active users list to all clients
+func (s *server) broadcastAllActiveUsers() {
+	// Get a snapshot of current active users with proper locking
+	s.activeUsersMutex.RLock()
+	activeUsersList := make([]string, 0, len(s.activeUsers))
+	for user := range s.activeUsers {
+		activeUsersList = append(activeUsersList, user)
+	}
+	s.activeUsersMutex.RUnlock()
+
+	log.Printf("Broadcasting full active users list to all clients: %v", activeUsersList)
+
+	// Create the update message
+	update := &pb.ActiveUsersUpdate{
+		UpdateType: pb.ActiveUsersUpdate_FULL_LIST,
+		Users:      activeUsersList,
+	}
+
+	// Send to all active streams
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, userStream := range s.userUpdateStreams {
+		if err := userStream.Send(update); err != nil {
+			log.Printf("Error sending full users list to stream %s: %v", id, err)
+		} else {
+			log.Printf("Successfully sent active users list to stream %s", id)
+		}
+	}
 }
 
 // Add a function to handle user leaving
@@ -204,11 +242,11 @@ func (s *server) ActiveUsersStream(req *pb.ActiveUsersRequest, stream pb.ChatSer
 	return nil
 }
 
-// Helper function to broadcast user join to all active user streams
+// Modified to ensure all clients get a full user list after any change
 func (s *server) broadcastUserJoin(username string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
+	// First send the JOIN notification
 	update := &pb.ActiveUsersUpdate{
 		UpdateType: pb.ActiveUsersUpdate_JOIN,
 		Username:   username,
@@ -219,13 +257,17 @@ func (s *server) broadcastUserJoin(username string) {
 			log.Printf("Error sending user join update to stream %s: %v", id, err)
 		}
 	}
+	s.mu.Unlock()
+
+	// Then broadcast the full list to ensure all clients are in sync
+	go s.broadcastAllActiveUsers()
 }
 
-// Helper function to broadcast user leave to all active user streams
+// Modified to ensure all clients get a full user list after any change
 func (s *server) broadcastUserLeave(username string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
+	// First send the LEAVE notification
 	update := &pb.ActiveUsersUpdate{
 		UpdateType: pb.ActiveUsersUpdate_LEAVE,
 		Username:   username,
@@ -236,6 +278,10 @@ func (s *server) broadcastUserLeave(username string) {
 			log.Printf("Error sending user leave update to stream %s: %v", id, err)
 		}
 	}
+	s.mu.Unlock()
+
+	// Then broadcast the full list to ensure all clients are in sync
+	go s.broadcastAllActiveUsers()
 }
 
 // Helper function to broadcast message to all streams

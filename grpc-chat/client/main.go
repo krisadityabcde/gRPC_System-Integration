@@ -249,8 +249,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("User %s logged in successfully from client %s", loginUsername, clientIP)
 	log.Printf("Current logged in users: %v", usernames)
 
-	// Start streaming active users for this client
+	// Start streaming active users for this client - do this first to ensure immediate display
 	go startActiveUsersStream(loginUsername)
+
+	// Brief delay to allow the active users list to be processed
+	time.Sleep(100 * time.Millisecond)
 
 	// Jalankan goroutine untuk menerima pesan dari this user's stream
 	go receiveMessagesForUser(clientIP, newStream)
@@ -589,10 +592,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Logout for client %s (%s), was logged in: %v", loggedInUsername, clientIP, wasLoggedIn)
 
 	// Return success response with cache control to prevent browser caching
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
+	setStandardHeaders(w)
 	fmt.Fprintf(w, `{"success":true}`)
 }
 
@@ -603,8 +603,7 @@ func checkSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Session check for %s: logged in = %v", clientIP, isLoggedIn)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	setStandardHeaders(w)
 	fmt.Fprintf(w, `{"loggedIn":%t}`, isLoggedIn)
 }
 
@@ -658,7 +657,7 @@ func decrementClientCount() {
 	log.Printf("Client count decremented to %d", count)
 }
 
-// Handler for ping requests to test latency
+// Handle for ping requests - streamline duplicate error checking pattern
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	// Record start time for server processing
 	startTime := time.Now()
@@ -667,16 +666,20 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIdentifier(r)
 	log.Printf("Ping request from client %s", clientIP)
 
-	// Add a small delay to simulate processing (optional)
-	// time.Sleep(10 * time.Millisecond)
-
 	// Calculate processing time
 	serverTime := time.Since(startTime).Milliseconds()
 
-	// Return pong response with timing info
+	// Return pong response with timing info - use a common header setting pattern
+	setStandardHeaders(w)
+	fmt.Fprintf(w, `{"message":"pong","serverTime":%d}`, serverTime)
+}
+
+// Extract common header setting into a function to reduce duplication
+func setStandardHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	fmt.Fprintf(w, `{"message":"pong","serverTime":%d}`, serverTime)
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 // Add a function to start streaming active users
@@ -703,7 +706,7 @@ func startActiveUsersStream(username string) {
 	go receiveActiveUserUpdates()
 }
 
-// Add a function to receive active user updates
+// Add a function to receive active user updates - remove duplicate stream existence check
 func receiveActiveUserUpdates() {
 	for {
 		// Check if stream exists
@@ -725,36 +728,46 @@ func receiveActiveUserUpdates() {
 			return
 		}
 
+		// Share code for broadcasting messages to all clients
+		broadcastSystemMessage := func(msg string) {
+			for _, ch := range messageChannels {
+				systemMsg := &pb.ChatMessage{
+					Sender:    "System",
+					Message:   msg,
+					Timestamp: time.Now().Format("15:04:05"),
+				}
+
+				select {
+				case ch <- systemMsg:
+					// Message sent successfully
+				default:
+					log.Printf("Channel buffer full, skipping update")
+				}
+			}
+		}
+
 		// Process the update based on the type
 		switch update.UpdateType {
 		case pb.ActiveUsersUpdate_FULL_LIST:
 			// Full list of active users
 			log.Printf("Received full active users list: %v", update.Users)
 
-			// Send as system message with a specific prefix for JavaScript to identify
-			usersStr := strings.Join(update.Users, ", ")
-			for _, ch := range messageChannels {
-				usersListMsg := &pb.ChatMessage{
-					Sender:    "System",
-					Message:   fmt.Sprintf("Active Users: %s", usersStr),
-					Timestamp: time.Now().Format("15:04:05"),
-				}
+			// Create a copy of update.Users to avoid any potential race conditions
+			usersCopy := make([]string, len(update.Users))
+			copy(usersCopy, update.Users)
 
-				select {
-				case ch <- usersListMsg:
-					// Message sent successfully
-				default:
-					log.Printf("Channel buffer full, skipping active users update")
-				}
-			}
+			// Use the shared function
+			broadcastSystemMessage(fmt.Sprintf("ActiveUsersList: %s", strings.Join(usersCopy, ", ")))
 
 		case pb.ActiveUsersUpdate_JOIN:
-			// User joined - this will be handled via chat messages and our JavaScript
+			// User joined
 			log.Printf("User joined: %s", update.Username)
+			broadcastSystemMessage(fmt.Sprintf("UserJoined: %s", update.Username))
 
 		case pb.ActiveUsersUpdate_LEAVE:
-			// User left - this will be handled via chat messages and our JavaScript
+			// User left
 			log.Printf("User left: %s", update.Username)
+			broadcastSystemMessage(fmt.Sprintf("UserLeft: %s", update.Username))
 		}
 	}
 }

@@ -104,11 +104,9 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 
 function startChat() {
-    // Make sure we're setting the global username from cookie if possible
-    if (!username) {
-        username = getCookie('username') || "Anonymous";
-        console.log("Using username from cookie:", username);
-    }
+    // Centralize username initialization here
+    username = getCookie('username') || "Anonymous";
+    console.log("Using username from cookie:", username);
     
     // First make sure any existing connection is closed
     if (eventSource) {
@@ -152,33 +150,52 @@ function startChat() {
         
         console.log("Message received:", msg);
         
-        // Extract username from message format: <username> message
-        const messageUsername = extractUsernameFromMessage(msg);
-        const messageContent = extractMessageContent(msg);
+        // Handle special system messages
+        if (msg.includes("<System>")) {
+            const systemMessage = msg.replace("<System>", "").trim();
+            
+            // Handle active users list from gRPC streaming
+            if (systemMessage.startsWith("ActiveUsersList:")) {
+                const usersList = systemMessage.replace("ActiveUsersList:", "").trim();
+                console.log("Received active users list:", usersList);
+                processActiveUsersList(usersList);
+                return;
+            }
+            
+            // Handle user joined notification
+            if (systemMessage.startsWith("UserJoined:")) {
+                const joinedUser = systemMessage.replace("UserJoined:", "").trim();
+                console.log("User joined:", joinedUser);
+                addActiveUser(joinedUser);
+                updateActiveUsersList();
+                return;
+            }
+            
+            // Handle user left notification
+            if (systemMessage.startsWith("UserLeft:")) {
+                const leftUser = systemMessage.replace("UserLeft:", "").trim();
+                console.log("User left:", leftUser);
+                removeActiveUser(leftUser);
+                updateActiveUsersList();
+                return;
+            }
+        }
         
         // Get our username directly from cookie every time to ensure consistency
         const currentUsername = getCookie('username');
+        
+        // For normal messages, extract the sender using a simpler method
+        const sender = extractSender(msg);
         
         // A message is our own if it matches one of our locally echoed messages
         // Or if the sender username matches our username from cookie
         let isOwnMessage = localEchoMessages.has(msg);
         
-        // Add another check comparing usernames
-        if (!isOwnMessage && messageUsername === currentUsername) {
+        // Add another check comparing sender
+        if (!isOwnMessage && sender === currentUsername) {
             isOwnMessage = true;
             console.log("Message identified as own based on username match");
         }
-        
-        console.log(`Message from ${messageUsername}, currentUsername: ${currentUsername}, isOwn: ${isOwnMessage}`);
-        
-        // Process active users list messages - this is the gRPC streamed data
-        if (messageUsername === "System" && messageContent && messageContent.startsWith("Active Users:")) {
-            handleActiveUsersList(messageContent);
-            return;
-        }
-        
-        // Handle user join/leave messages
-        handleUserStatusChange(messageUsername, messageContent);
         
         // Add to chat display with proper ownership flag
         addMessageToChat(msg, false, isOwnMessage);
@@ -230,20 +247,17 @@ function extractMessageContent(message) {
     return "";
 }
 
-// Handle active users list messages from the server
-function handleActiveUsersList(message) {
-    console.log("Processing active users list:", message);
-    
-    // Parse the message "Active Users: user1, user2, user3"
-    const usersPart = message.replace("Active Users:", "").trim();
+// Process active users list from gRPC streaming
+function processActiveUsersList(usersList) {
+    console.log("Processing active users list:", usersList);
     
     // Clear the current active users set
     activeUsers.clear();
     
     // If we have users, split and add them
-    if (usersPart && usersPart !== "") {
-        const usersList = usersPart.split(",").map(user => user.trim());
-        usersList.forEach(user => {
+    if (usersList && usersList !== "") {
+        const users = usersList.split(",").map(user => user.trim());
+        users.forEach(user => {
             if (user !== "System") {
                 addActiveUser(user);
             }
@@ -251,8 +265,9 @@ function handleActiveUsersList(message) {
     }
     
     // Ensure current user is in the list
-    if (username && username !== "System") {
-        addActiveUser(username);
+    const currentUser = getCookie('username');
+    if (currentUser && currentUser !== "System") {
+        addActiveUser(currentUser);
     }
     
     // Update the UI
@@ -260,36 +275,19 @@ function handleActiveUsersList(message) {
     console.log("Active users list updated with:", Array.from(activeUsers));
 }
 
-// Handle user status changes (join/leave)
-function handleUserStatusChange(username, messageContent) {
-    if (!username || username === "System") {
+// Handle user status changes (join/leave) - simplified version
+function handleUserStatusChange(senderName, messageContent) {
+    if (!senderName || senderName === "System") {
         return;
     }
     
-    if (messageContent === "joined the chat") {
-        console.log(`User ${username} has joined`);
-        addActiveUser(username);
-        updateActiveUsersList();
-    } else if (messageContent === "left the chat" || messageContent === "left the chat (client shutdown)") {
-        console.log(`User ${username} has left`);
-        removeActiveUser(username);
-        updateActiveUsersList();
-    } else {
-        // Regular message, ensure user is in active list
-        addActiveUser(username);
+    // Add sender to active users for regular messages
+    if (senderName && senderName !== "System") {
+        addActiveUser(senderName);
     }
 }
 
-// Improved function to extract username from message
-function extractUsernameFromMessage(message) {
-    const match = message.match(/<([^>]+)>/);
-    if (match && match[1]) {
-        return match[1].trim();
-    }
-    return null;
-}
-
-// Improved function to add messages to chat
+// Improved function to add messages to chat - without extractUsernameFromMessage
 function addMessageToChat(message, isLocalEcho = false, isOwnMessage = false) {
     console.log(`Adding message to chat box: ${message} (local echo: ${isLocalEcho}, own message: ${isOwnMessage})`);
     
@@ -323,35 +321,27 @@ function addMessageToChat(message, isLocalEcho = false, isOwnMessage = false) {
     
     try {
         // Try to parse the username format <username> message
-        const usernameMatch = message.match(/^<([^>]+)>/);
-        if (usernameMatch) {
-            const extractedUsername = usernameMatch[1];
-            const messageContent = message.substring(usernameMatch[0].length).trim();
+        const senderMatch = message.match(/^<([^>]+)>/);
+        if (senderMatch) {
+            const sender = senderMatch[1];
+            const messageContent = message.substring(senderMatch[0].length).trim();
             
-            console.log(`Formatted message - Username: ${extractedUsername}, Content: ${messageContent}`);
+            console.log(`Formatted message - Sender: ${sender}, Content: ${messageContent}`);
             
             // Check if this is a "left the chat" message
-            if (messageContent === "left the chat") {
-                console.log(`User ${extractedUsername} has left the chat`);
-                removeActiveUser(extractedUsername);
+            if (messageContent === "left the chat" || messageContent === "left the chat (client shutdown)") {
+                // We don't need to call removeActiveUser here as we're handling this via dedicated gRPC messages
                 
                 // Add with special style
-                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> <span style="color: #f55;">${messageContent}</span>`;
-            } else if (messageContent === "left the chat (client shutdown)") {
-                console.log(`User ${extractedUsername} has left the chat`);
-                removeActiveUser(extractedUsername);
-                
-                // Add with special style
-                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> <span style="color: #f55;">${messageContent}</span>`; 
+                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${sender}&gt;</span> <span style="color: #f55;">${messageContent}</span>`;
             }
             else {
-                // Regular message - IMPORTANT: Always use the username from the message
-                // Don't replace it with the local username even for local echoes
-                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${extractedUsername}&gt;</span> ${messageContent}`;
+                // Regular message
+                messageElement.innerHTML = `<span class="username-highlight" style="color: #ff0; font-weight: bold;">&lt;${sender}&gt;</span> ${messageContent}`;
                 
-                // Any user who sends a message is active - add them to active users
-                if (extractedUsername && extractedUsername !== "System") {
-                    addActiveUser(extractedUsername);
+                // Any user who sends a message is active
+                if (sender && sender !== "System") {
+                    addActiveUser(sender);
                 }
             }
         } else {
@@ -389,21 +379,18 @@ function generateClientId() {
 
 // Add window event handlers to clean up EventSource on page unload
 window.addEventListener('beforeunload', function() {
+    // First close EventSource connection
     if (eventSource) {
         console.log("Closing EventSource connection before page unload");
         eventSource.close();
+        eventSource = null;
     }
-});
-
-// Enhanced beforeunload handler to clean up when the page is closed
-window.addEventListener('beforeunload', function() {
-    // Call the cleanup endpoint to decrement the client count
+    
+    // Then call the cleanup endpoint
     if (navigator.sendBeacon) {
-        // Use sendBeacon API for more reliable delivery during page unload
         navigator.sendBeacon('/cleanup');
         console.log("Sent cleanup request via sendBeacon");
     } else {
-        // Fallback to synchronous XHR which is less reliable but better than nothing
         try {
             const xhr = new XMLHttpRequest();
             xhr.open('GET', '/cleanup', false); // false makes it synchronous
@@ -412,13 +399,6 @@ window.addEventListener('beforeunload', function() {
         } catch (e) {
             console.error("Failed to send cleanup request:", e);
         }
-    }
-    
-    // Close EventSource connection
-    if (eventSource) {
-        console.log("Closing EventSource connection before page unload");
-        eventSource.close();
-        eventSource = null;
     }
 });
 
@@ -644,8 +624,6 @@ function alternateProfileImage() {
     profileImg.src = isTalking ? '/static/img/talk.png' : '/static/img/normal.png';
 }
 
-username = getCookie('username');
-
 // Function to add username to active users
 function addActiveUser(username) {
     // Never add System to the active users list
@@ -668,27 +646,36 @@ function removeActiveUser(username) {
     }
 }
 
-// Function to update active users list in the UI
+// Update to refresh UI more consistently
 function updateActiveUsersList() {
     const activeUsersElement = document.getElementById('active-users');
+    if (!activeUsersElement) return; // Safety check
+    
     // Keep the heading
     activeUsersElement.innerHTML = '<h3>Active Users</h3>';
     
+    // Sort users alphabetically for consistent display
+    const sortedUsers = Array.from(activeUsers).sort();
+    
+    // Get current username once - prevent duplicate lookups
+    const currentUser = getCookie('username');
+    
     // Add each user as a list item
-    activeUsers.forEach(user => {
+    sortedUsers.forEach(user => {
         const userElement = document.createElement('div');
         userElement.className = 'user-item';
-        userElement.textContent = user;
+        
+        // Highlight current user
+        if (user === currentUser) {
+            userElement.style.fontWeight = 'bold';
+            userElement.style.color = '#00ffff'; // Cyan color for current user
+            userElement.textContent = user + ' (you)';
+        } else {
+            userElement.textContent = user;
+        }
+        
         activeUsersElement.appendChild(userElement);
     });
-    
-    // Also ensure current username is included
-    const currentPort = window.location.port || '8080';
-    username = getCookie('username') || "";
-    
-    if (username && username !== "System" && !activeUsers.has(username)) {
-        addActiveUser(username);
-    }
 }
 
 // Event listener for message input
@@ -699,17 +686,13 @@ document.getElementById('message').addEventListener('keypress', function(e) {
 });
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize username from cookie right away
-    username = getCookie('username') || "";
-    console.log("DOMContentLoaded: Using username from cookie:", username);
-    
-    // Initialize chat immediately
+    // Start chat immediately (which will initialize username)
     startChat();
     
-    // Add current user to active users list
+    // Add current user to active users list (but active users will now come from gRPC)
     if (username && username !== "System") {
         addActiveUser(username);
-        updateActiveUsersList(); // Make sure to update the UI immediately
+        updateActiveUsersList(); // Initial update before receiving server data
     }
     
     // Update date and time
@@ -743,8 +726,8 @@ function updateDateTime() {
     document.getElementById('current-time').textContent = `${String(hours).padStart(2, '0')}:${minutes}:${seconds} ${ampm}`;
 }
 
-// Extract usernames from messages
-function extractUsernameFromMessage(message) {
+// Extract sender directly without using extractUsernameFromMessage
+function extractSender(message) {
     const match = message.match(/<([^>]+)>/);
     if (match && match[1]) {
         return match[1].trim();
